@@ -1,10 +1,4 @@
-// main.c
-#include <stdint.h>
-
-// 声明串口输出函数 (在 uart.c)
-void uart_putc(char c);
-void uart_puts(char *s);
-int uart_getc(void);
+#include "defs.h"
 
 void main()
 {
@@ -14,9 +8,19 @@ void main()
     uart_puts("xv6 on K230: Hello from S-mode!\n");
     uart_puts("--------------------------------\n");
 
-    while (1)
-    {
-        /* code */
+    kinit(); // 初始化物理内存管理
+    uart_puts("kinit success\n");
+
+
+    void *p = kalloc();
+    if(p){
+        uart_puts("kalloc success,address = %p\n");
+        // 这里还没有 printf 打印地址，但只要不为 NULL 就行
+        uart_puts("got a page!\n");
+        kfree(p);
+    } else {
+        uart_puts("kalloc failed\n");
     }
-    
+
+    while(1);
 }

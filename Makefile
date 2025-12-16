@@ -17,6 +17,7 @@ OBJS = \
   $K/entry.o \
   $K/start.o \
   $K/uart.o \
+  $K/kalloc.o \
   $K/main.o \
   # 将来在这里添加 $K/vm.o $K/proc.o ...
 
