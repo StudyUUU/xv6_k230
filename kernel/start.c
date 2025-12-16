@@ -20,7 +20,7 @@ void uart_puts(char *s);
 
 void start()
 {
-  uart_puts("we are in S-mode start\n");
+  uart_puts("we are in M-mode start()\n");
 
   unsigned long x = r_mstatus();
   x &= ~MSTATUS_MPP_MASK;
@@ -55,5 +55,5 @@ void start()
   uart_puts("mret to S-mode main\n"); 
 
   asm volatile("fence.i"); 
-  asm volatile("mret");
+  asm volatile("mret"); 
 }

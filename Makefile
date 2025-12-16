@@ -3,27 +3,38 @@ CC = $(TOOLPREFIX)gcc
 LD = $(TOOLPREFIX)ld
 OBJCOPY = $(TOOLPREFIX)objcopy
 
-# 编译选项：禁止标准库，禁止浮点，指定架构
+# 编译器参数：增加了 -I. 以便能找到头文件
 CFLAGS = -Wall -Werror -O -fno-omit-frame-pointer -ggdb
 CFLAGS += -mcmodel=medany -mno-relax
 CFLAGS += -ffreestanding -fno-common -nostdlib -mno-riscv-attribute
+CFLAGS += -I. 
 
-OBJS = entry.o start.o uart.o main.o
+# 源码都在 kernel/ 目录下
+K = kernel
 
+# 定义源文件列表
+OBJS = \
+  $K/entry.o \
+  $K/start.o \
+  $K/uart.o \
+  $K/main.o \
+  # 将来在这里添加 $K/vm.o $K/proc.o ...
+
+# 最终目标
 all: kernel.bin
 
-# 链接步骤
-kernel.bin: $(OBJS) kernel.ld
-	$(LD) -T kernel.ld -o kernel.elf $(OBJS)
+# 链接规则：注意依赖 kernel/kernel.ld
+kernel.bin: $(OBJS) $K/kernel.ld
+	$(LD) -T $K/kernel.ld -o kernel.elf $(OBJS)
 	$(OBJCOPY) -O binary kernel.elf kernel.bin
 	cp kernel.bin /home/alientek/linux/tftp/
-# 编译 C 文件
-%.o: %.c
+
+# 通用编译规则：自动匹配 kernel/ 下的 .c 和 .S
+$K/%.o: $K/%.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
-# 编译汇编文件
-%.o: %.S
+$K/%.o: $K/%.S
 	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
-	rm -f *.o *.elf *.bin
+	rm -f $K/*.o *.elf *.bin
