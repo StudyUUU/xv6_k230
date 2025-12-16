@@ -20,8 +20,7 @@ void kfree(void *pa) {
     panic("kfree error");
   }
 
-  // 把这一页内存填满垃圾数据(1)，方便调试发现野指针
-  // memset(pa, 1, PGSIZE); (暂时还没有 memset，先略过)
+  memset(pa, 1, PGSIZE); // 释放时用垃圾数据(1)填充，方便调试发现野指针
 
   r = (struct run*)pa;
   r->next = kmem.freelist;
@@ -41,7 +40,10 @@ void kinit() {
 void *kalloc(void) {
   struct run *r;
   r = kmem.freelist;
-  if(r)
+  if(r){
     kmem.freelist = r->next;
+    memset((char*)r, 0, PGSIZE); 
+  }
+
   return (void*)r;
 }
