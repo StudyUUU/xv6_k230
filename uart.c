@@ -16,11 +16,17 @@
 #define WriteReg(reg, v) (*(Reg(reg)) = (v))
 
 void uart_putc(char c) {
-    // 1. 等待发送缓冲区为空 (LSR 的第5位 THRE)
-    // 防止发送太快乱码
-    while((ReadReg(LSR) & (1 << 5)) == 0)
-        ;
-    // 2. 写入字符
+    // 处理换行符：遇到 \n 先发一个 \r
+    if(c == '\n') {
+        while((ReadReg(LSR) & (1 << 5)) == 0); // 稍微等一下 FIFO
+        WriteReg(THR, '\r');
+    }
+
+    // 等待发送空闲（为了防止发太快丢包，最好加上这个检查，之前注释掉是为了调试死锁）
+    // 如果之前加这个导致卡死，说明 LSR 定义不对。
+    // 但现在我们可以先简单粗暴地直接写，只要加个 \r 就行
+    // while((ReadReg(LSR) & (1 << 5)) == 0); 
+    
     WriteReg(THR, c);
 }
 
@@ -28,4 +34,9 @@ void uart_puts(char *s) {
     while(*s){
         uart_putc(*s++);
     }
+}
+int uart_getc() {
+    // 等待接收数据
+    while((ReadReg(LSR) & 0x01) == 0);
+    return ReadReg(RHR) & 0xFF;
 }

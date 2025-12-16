@@ -16,7 +16,7 @@ all: kernel.bin
 kernel.bin: $(OBJS) kernel.ld
 	$(LD) -T kernel.ld -o kernel.elf $(OBJS)
 	$(OBJCOPY) -O binary kernel.elf kernel.bin
-
+	cp kernel.bin /home/alientek/linux/tftp/
 # 编译 C 文件
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
