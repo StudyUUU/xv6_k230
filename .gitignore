@@ -69,3 +69,6 @@ gdb.txt
 # Clangd / LSP 生成的编译数据库
 compile_commands.json
 .cache/
+
+# LLM的指导文件
+.github/
