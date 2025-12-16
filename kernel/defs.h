@@ -2,9 +2,9 @@
 #define DEFS_H
 
 // uart.c
-void uart_putc(char c);
-void uart_puts(char *s);
-int uart_getc(void);
+#define CMD_BUF_SIZE 36
+void printf(const char *fmt, ...);
+int uart_getline(char *buf, int n);
 
 // kalloc.c
 void* kalloc(void);

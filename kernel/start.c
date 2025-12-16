@@ -1,5 +1,6 @@
 // start.c
 #include <stdint.h>
+#include "defs.h"
 
 #define MSTATUS_MPP_MASK (3L << 11)
 #define MSTATUS_MPP_S    (1L << 11)
@@ -16,11 +17,10 @@ static inline uint64_t r_mhartid() { uint64_t x; asm volatile("csrr %0, mhartid"
 __attribute__ ((aligned (16))) char stack0[4096];
 
 void main();
-void uart_puts(char *s);
 
 void start()
 {
-  uart_puts("we are in M-mode start()\n");
+  printf("we are in M-mode start()\n");
 
   unsigned long x = r_mstatus();
   x &= ~MSTATUS_MPP_MASK;
@@ -52,7 +52,7 @@ void start()
   int id = r_mhartid();
   w_tp(id);
 
-  uart_puts("mret to S-mode main\n"); 
+  printf("mret to S-mode main\n"); 
 
   asm volatile("fence.i"); 
   asm volatile("mret"); 
