@@ -16,8 +16,9 @@ struct {
 void kfree(void *pa) {
   struct run *r;
   if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
-    // 这里应该 panic，但我们还没有 panic 函数，暂时死循环
-    while(1);
+  {
+    panic("kfree error");
+  }
 
   // 把这一页内存填满垃圾数据(1)，方便调试发现野指针
   // memset(pa, 1, PGSIZE); (暂时还没有 memset，先略过)

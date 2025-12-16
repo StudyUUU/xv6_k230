@@ -152,3 +152,9 @@ int uart_getline(char *buf, int n) {
     buf[i] = '\0';
     return i;
 }
+void panic(const char *s) {
+    printf("panic: ");
+    printf((char *)s);
+    printf("\n");
+    while(1);
+}
