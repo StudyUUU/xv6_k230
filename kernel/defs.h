@@ -2,6 +2,7 @@
 #define DEFS_H
 
 #include "types.h"
+#include "riscv.h"
 
 // uart.c
 #define CMD_BUF_SIZE 36
@@ -18,5 +19,10 @@ void kinit(void);
 void* memset(void *dst, int c, uint n);
 void* memmove(void *dst, const void *src, uint n);
 void* memcpy(void *dst, const void *src, uint n);
+
+// vm.c
+pte_t *walk(pagetable_t pagetable, uint64 va, int alloc);
+int mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm);
+void test_vm(void);
 
 #endif // DEFS_H

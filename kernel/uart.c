@@ -10,6 +10,7 @@
 #define RHR 0    // Receive Holding Register (read mode)
 #define THR 0    // Transmit Holding Register (write mode)
 #define LSR 5    // Line Status Register
+#define LSR_THRE (1 << 5) // 发送持有寄存器为空标志
 
 // 指针宏
 #define Reg(reg) ((volatile uint32_t *)(UART0_BASE + reg * 4))
@@ -17,21 +18,21 @@
 #define WriteReg(reg, v) (*(Reg(reg)) = (v))
 
 static void uart_putc(char c) {
-    // 处理换行符：遇到 \n 先发一个 \r
+    // 1. 处理换行
     if(c == '\n') {
-        while((ReadReg(LSR) & (1 << 5)) == 0); // 稍微等一下 FIFO
+        // 等待直到硬件 FIFO 有空位
+        while((ReadReg(LSR) & LSR_THRE) == 0); 
         WriteReg(THR, '\r');
     }
 
-    // 等待发送空闲（为了防止发太快丢包，最好加上这个检查，之前注释掉是为了调试死锁）
-    // 如果之前加这个导致卡死，说明 LSR 定义不对。
-    // 但现在我们可以先简单粗暴地直接写，只要加个 \r 就行
-    // while((ReadReg(LSR) & (1 << 5)) == 0); 
+    // 2. 发送当前字符前，必须等待 FIFO 有空位
+    // 这一步如果不加，由于 printf 跑得太快，连续发送会导致后面字符挤掉前面字符
+    while((ReadReg(LSR) & LSR_THRE) == 0); 
     
     WriteReg(THR, c);
 }
 
-static void uart_puts(char *s) {
+void uart_puts(char *s) {
     while(*s){
         uart_putc(*s++);
     }

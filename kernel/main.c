@@ -11,22 +11,12 @@ void main()
     kinit(); // 初始化物理内存管理
     printf("kinit success\n");
 
+    test_vm();
 
-    void *p = kalloc();
-    if(p){
-        printf("kalloc success,address = %p\n", p);
-        // 这里还没有 printf 打印地址，但只要不为 NULL 就行
-        printf("got a page!\n");
-        kfree(p);
-    } else {
-        printf("kalloc failed\n");
+    while (1)
+    {
+        /* code */
     }
-
-    char cmd[CMD_BUF_SIZE];
-    while(1) {
-        printf("cmd: ");
-        uart_getline(cmd, sizeof(cmd));
-        printf("You entered: %s\n", cmd);
-    }
+    
     
 }

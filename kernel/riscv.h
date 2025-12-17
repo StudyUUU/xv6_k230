@@ -1,6 +1,8 @@
 #ifndef RISCV_H
 #define RISCV_H
 
+#define MAXVA (1L << (9 + 9 + 9 + 12 - 1))
+
 // 1. 模式与状态寄存器 (mstatus / sstatus)
 // mstatus 寄存器的位定义
 #define MSTATUS_MPP_MASK (3L << 11) // 之前的模式

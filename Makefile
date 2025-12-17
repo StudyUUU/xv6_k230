@@ -20,6 +20,7 @@ OBJS = \
   $K/kalloc.o \
   $K/main.o \
   $K/string.o \
+  $K/vm.o \
   # 将来在这里添加 $K/vm.o $K/proc.o ...
 
 # 最终目标
