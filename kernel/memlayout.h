@@ -9,6 +9,7 @@
 // K230 有 512MB 或 1GB 内存。
 // 但为了安全起见，我们在裸机实验阶段先只管理 128MB。
 // 任何超过 PHYSTOP 的地址，kalloc 都不会去触碰，防止踩到未知的硬件区域。
+// MMU 刚起来、无完整 trap、无 page fault handler，先不使用1GB
 #define PHYSTOP (KERNBASE + 128*1024*1024) 
 
 // 3. 页大小 (RISC-V 标准)

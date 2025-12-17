@@ -3,7 +3,11 @@
 #include "riscv.h"
 #include "defs.h"
 
+// 全局变量：内核根页表
+pagetable_t kernel_pagetable;
 
+extern char etext[];      // 内核代码结束地址
+extern char trampoline[]; // 暂时不用，但最好在 kernel.ld 里留着位置
 
 /*
  * 这里的逻辑是 XV6 虚拟内存的核心。
@@ -84,55 +88,93 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
   return 0;
 }
 
-void test_vm() {
-    printf("\n=== [TEST] Virtual Memory Toolchain ===\n");
+// 辅助函数：简化 mappages 调用，如果失败直接死循环
+void kvmmap(pagetable_t pagetable, uint64 va, uint64 pa, uint64 sz, int perm) {
+  if(mappages(pagetable, va, sz, pa, perm) != 0) {
+    printf("kvmmap: failed to map 0x%p\n", va);
+    while(1); // panic
+  }
+}
 
-    // 1. 分配一个根页表
-    pagetable_t root = (pagetable_t)kalloc();
-    if(root == 0) {
-        printf("Error: kalloc failed to allocate root page table\n");
+// 创建一个内核页表
+pagetable_t kvmmake(void)
+{
+  pagetable_t kpgtbl;
+
+  kpgtbl = (pagetable_t) kalloc();
+
+  // 在QEMU中A = Accessed，D = Dirty自动置位
+  // 在K230中硬件不自动置位 A / D，而软件又没有预先置位：那么每一次“访问内存 / 执行指令”，都会直接触发 Page Fault
+
+  // 1. 映射 UART
+  kvmmap(kpgtbl, UART0, UART0, PGSIZE, PTE_R | PTE_W | PTE_A | PTE_D);
+
+  // 2. [移除] VIRTIO (K230 没有这个)
+  // kvmmap(kpgtbl, VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W);
+
+  // 3. [移除] PLIC (K230 地址不同，暂时不映射)
+  // kvmmap(kpgtbl, PLIC, PLIC, 0x400000, PTE_R | PTE_W);
+
+  // 4. [精细映射] 内核代码段 (R-X)
+  // 范围: KERNBASE ~ etext
+  kvmmap(kpgtbl, KERNBASE, KERNBASE, (uint64)etext - KERNBASE, PTE_R | PTE_X | PTE_A);
+
+  // 5. [精细映射] 内核数据段 + 剩余物理内存 (RW-)
+  // 范围: etext ~ PHYSTOP
+  kvmmap(kpgtbl, (uint64)etext, (uint64)etext, PHYSTOP - (uint64)etext, PTE_R | PTE_W | PTE_A | PTE_D);
+
+  // 6. [暂时注释] Trampoline (跳板页)
+  // 等你写了 trampoline.S 后再开
+  // kvmmap(kpgtbl, TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X);
+
+  // 7. [暂时注释] 映射内核栈 (需要 proc.c)
+  // proc_mapstacks(kpgtbl);
+  
+  return kpgtbl;
+}
+
+void kvminit(void)
+{
+  kernel_pagetable = kvmmake();
+}
+
+
+// 开启分页机制 (激活地图)
+void kvminithart() {
+  // 写入 satp 寄存器
+  // MAKE_SATP 宏在 riscv.h 中定义，设置模式为 Sv39 并填入根页表物理页号
+  w_satp(MAKE_SATP(kernel_pagetable));
+
+  // 刷新 TLB (快表)
+  // 必须执行！否则 CPU 可能还缓存着旧的地址转换规则
+  sfence_vma();
+}
+
+// 辅助验证函数
+void check_mapping(uint64 va, uint64 expect_pa, int expect_perm, char *name) {
+    pte_t *pte = walk(kernel_pagetable, va, 0); // 只查找，不分配
+
+    printf("Check %s (VA: %p): ", name, va);
+    
+    if (pte == 0 || (*pte & PTE_V) == 0) {
+        printf("FAIL! Not mapped.\n");
         return;
     }
-    memset(root, 0, PGSIZE);
-    printf("1. Root page table created at: %p\n", root);
 
-    // 2. 模拟映射：将内核虚拟地址映射到物理内存
-    // 虚拟地址: 0x80000000, 物理地址: 0x00400000 (假设的一块内存)
-    uint64 va = 0x80000000L;
-    uint64 pa = 0x00400000L;
-    int perm = PTE_R | PTE_W | PTE_X;
+    uint64 pa = PTE2PA(*pte);
+    int perm = PTE_FLAGS(*pte) & 0x3FF; // 取出标志位
 
-    printf("2. Mapping VA %p to PA %p...\n", va, pa);
-    if(mappages(root, va, PGSIZE, pa, perm) != 0) {
-        printf("   FAIL: mappages error\n");
+    // 检查物理地址
+    if (pa != expect_pa) {
+        printf("FAIL! PA mismatch. Got %p, Expect %p\n", pa, expect_pa);
         return;
     }
-    printf("   Success: mappages linked the addresses.\n");
 
-    // 3. 验证 walk 函数
-    printf("3. Verifying with walk(va=%p)...\n", va);
-    pte_t *pte = walk(root, va, 0);
-
-    if(pte == 0) {
-        printf("   FAIL: walk could not find the path to VA %p\n", va);
-    } else {
-        uint64 content = *pte;
-        uint64 found_pa = PTE2PA(content);
-        
-        printf("   - Found PTE at: %p\n", pte);
-        printf("   - PTE Content:  %p\n", content);
-        printf("   - Extracted PA: %p\n", found_pa);
-        printf("   - Flags: [ %s %s %s %s ]\n", 
-               (content & PTE_V) ? "V" : "-",
-               (content & PTE_R) ? "R" : "-",
-               (content & PTE_W) ? "W" : "-",
-               (content & PTE_X) ? "X" : "-");
-
-        // 最终校验
-        if(found_pa == pa && (content & PTE_V)) {
-            printf("=== [PASS] walk and mappages are working correctly! ===\n\n");
-        } else {
-            printf("=== [FAIL] Address mismatch or invalid PTE! ===\n\n");
-        }
+    // 检查权限 (必须包含期望的权限位)
+    if ((perm & expect_perm) != expect_perm) {
+        printf("FAIL! Perm mismatch. Got 0x%x, Expect 0x%x\n", perm, expect_perm);
+        return;
     }
+
+    printf("PASS. (PA: %p, Flags: 0x%x)\n", pa, perm);
 }

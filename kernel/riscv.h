@@ -32,6 +32,10 @@
 #define PTE_X (1L << 3) // 可执行
 #define PTE_U (1L << 4) // 用户可访问
 
+// 新增下面两个定义
+#define PTE_A (1L << 6) // Accessed (已访问)
+#define PTE_D (1L << 7) // Dirty (已脏)
+
 // 将物理地址转换为页表项中的物理页号 (PPN)
 #define PA2PTE(pa) ((((uint64)pa) >> 12) << 10)
 // 从页表项中提取物理地址

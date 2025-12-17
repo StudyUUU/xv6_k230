@@ -23,6 +23,8 @@ void* memcpy(void *dst, const void *src, uint n);
 // vm.c
 pte_t *walk(pagetable_t pagetable, uint64 va, int alloc);
 int mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm);
-void test_vm(void);
+void kvminit();
+void kvminithart();
+void check_mapping(uint64 va, uint64 expect_pa, int expect_perm, char *name);
 
 #endif // DEFS_H
