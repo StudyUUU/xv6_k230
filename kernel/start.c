@@ -18,6 +18,13 @@ __attribute__ ((aligned (16))) char stack0[4096];
 void uart_puts(char *s);
 void main();
 
+static inline void w_medeleg(uint64_t x) { 
+  asm volatile("csrw medeleg, %0" : : "r" (x)); 
+}
+static inline void w_mideleg(uint64_t x) { 
+  asm volatile("csrw mideleg, %0" : : "r" (x)); 
+}
+
 void start()
 {
   uart_puts("we are in M-mode start()\n");
@@ -26,6 +33,13 @@ void start()
   x &= ~MSTATUS_MPP_MASK;
   x |= MSTATUS_MPP_S;
   w_mstatus(x);
+
+  // 委托所有常见的异常给 S-mode
+  // 包括：Instruction/Load/Store Page Fault, Breakpoint, User Ecall 等
+  w_medeleg(0xffff);  
+  // 委托所有常见的中断给 S-mode
+  // 包括：Software, Timer, External interrupts (对应位)
+  w_mideleg(0xffff);  
 
   w_mepc((uint64_t)main);
   w_satp(0);

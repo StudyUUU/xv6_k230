@@ -27,4 +27,7 @@ void kvminit();
 void kvminithart();
 void check_mapping(uint64 va, uint64 expect_pa, int expect_perm, char *name);
 
+// trap.c
+void trap_init(void);
+
 #endif // DEFS_H

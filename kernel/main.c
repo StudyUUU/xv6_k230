@@ -1,7 +1,4 @@
 #include "defs.h"
-#include "memlayout.h"
-
-extern char etext[]; 
 
 void main()
 {
@@ -25,13 +22,18 @@ void main()
     // 这一步执行完，如果没有死机，说明恒等映射成功了
     printf("kvminithart: enabling MMU...\n");
     kvminithart();
-
     // 5. 验证
     // 这条打印语句发出的数据的物理地址是 UART0
     // 但 CPU 此时是通过查询页表找到 UART0 的
     // 虽然说在内核里面是属于直接映射，但它们的性质不一样
     // WriteReg(THR, c); -> sd a0, 0(a1)   // a1 = 0x91400000
     printf("MMU is ON! System is running in virtual memory mode.\n");
+
+    // 初始化trap
+    trap_init();
+    
+    // 非法指令触发异常
+    asm volatile(".word 0x00000000");
 
     while (1)
     {
