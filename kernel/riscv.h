@@ -1,149 +1,133 @@
 #ifndef RISCV_H
 #define RISCV_H
 
+#include "types.h"
+
+// ====================================================================
+// 1. K230 / C908 特有扩展寄存器与常量
+// ====================================================================
+// 时钟频率 27MHz -> 10ms = 270,000
+#define CLOCK_INTERVAL 270000
+
+// MXSTATUS (Machine Extended Status) - 0x7C0
+#define CSR_MXSTATUS        0x7C0
+#define MXSTATUS_CLINTEE    (1L << 17) // 允许 S-mode 响应 CLINT 中断
+#define MXSTATUS_MAEE       (1L << 21) // 扩展 MMU 属性
+#define MXSTATUS_THEADISAEE (1L << 22) // 允许玄铁扩展指令集
+
+// MENVCFG (Machine Environment Configuration) - 0x30A
+#define CSR_MENVCFG         0x30A
+#define MENVCFG_STCE        (1ULL << 63) // Sstc: S-mode Timer Compare Enable
+
+// ====================================================================
+// 2. 标准 RISC-V 状态寄存器位定义
+// ====================================================================
+// mstatus
+#define MSTATUS_MPP_MASK (3L << 11)
+#define MSTATUS_MPP_M    (3L << 11)
+#define MSTATUS_MPP_S    (1L << 11)
+#define MSTATUS_MPP_U    (0L << 11)
+#define MSTATUS_MIE      (1L << 3)
+
+// sstatus
+#define SSTATUS_SPP      (1L << 8)
+#define SSTATUS_SPIE     (1L << 5)
+#define SSTATUS_SIE      (1L << 1)
+
+// sie (Supervisor Interrupt Enable)
+#define SIE_SSIE (1L << 1) // 软件中断
+#define SIE_STIE (1L << 5) // 时钟中断
+#define SIE_SEIE (1L << 9) // 外部中断
+
+// ====================================================================
+// 3. 分页与内存宏 (Paging)
+// ====================================================================
 #define MAXVA (1L << (9 + 9 + 9 + 12 - 1))
+#define PGSIZE 4096
+#define PGSHIFT 12
 
-// 1. 模式与状态寄存器 (mstatus / sstatus)
-// mstatus 寄存器的位定义
-#define MSTATUS_MPP_MASK (3L << 11) // 之前的模式
-#define MSTATUS_MPP_M (3L << 11)
-#define MSTATUS_MPP_S (1L << 11)
-#define MSTATUS_MPP_U (0L << 11)
-#define MSTATUS_MIE (1L << 3)    // M-mode 中断使能
-
-// sstatus 寄存器的位定义 (S-mode 状态)
-#define SSTATUS_SPP (1L << 8)  // 之前的模式 (1=S, 0=U)
-#define SSTATUS_SPIE (1L << 5) // 之前的模式中断使能
-#define SSTATUS_SIE (1L << 1)  // S-mode 中断使能
-
-//2. 页表映射相关的宏 (为 kvminit 做准备)
-#define PGSIZE 4096 // 4KB 每页
-#define PGSHIFT 12  // 2^12 = 4096
-
-// 将地址向下对齐到页边界
 #define PGROUNDDOWN(a) (((a)) & ~(PGSIZE-1))
-// 将地址向上对齐到页边界
 #define PGROUNDUP(sz)  (((sz)+PGSIZE-1) & ~(PGSIZE-1))
 
-// 页表项 (PTE) 权限位
-#define PTE_V (1L << 0) // 有效 (Valid)
-#define PTE_R (1L << 1) // 可读
-#define PTE_W (1L << 2) // 可写
-#define PTE_X (1L << 3) // 可执行
-#define PTE_U (1L << 4) // 用户可访问
+#define PTE_V (1L << 0) // Valid
+#define PTE_R (1L << 1) // Read
+#define PTE_W (1L << 2) // Write
+#define PTE_X (1L << 3) // Exec
+#define PTE_U (1L << 4) // User
+#define PTE_A (1L << 6) // Accessed
+#define PTE_D (1L << 7) // Dirty
 
-// 新增下面两个定义
-#define PTE_A (1L << 6) // Accessed (已访问)
-#define PTE_D (1L << 7) // Dirty (已脏)
-
-// 将物理地址转换为页表项中的物理页号 (PPN)
 #define PA2PTE(pa) ((((uint64)pa) >> 12) << 10)
-// 从页表项中提取物理地址
 #define PTE2PA(pte) (((pte) >> 10) << 12)
-
-// 提取页表项中的标志位
 #define PTE_FLAGS(pte) ((pte) & 0x3FF)
 
-// 从虚拟地址中提取三级索引 (Sv39 模式: 9+9+9 位)
-#define PXMASK          0x1FF // 9 bits
+#define PXMASK          0x1FF
 #define PXSHIFT(level)  (PGSHIFT + (9*(level)))
 #define PX(level, va)   ((((uint64)va) >> PXSHIFT(level)) & PXMASK)
 
-// satp 寄存器：控制分页
-// 8L << 60 代表使用 Sv39 模式
 #define SATP_SV39 (8L << 60)
 #define MAKE_SATP(pagetable) (SATP_SV39 | (((uint64)pagetable) >> 12))
 
-// 3.读取/写入 CSR 寄存器的内联函数
-static inline uint64 r_mstatus() {
-  uint64 x;
-  asm volatile("csrr %0, mstatus" : "=r" (x) );
-  return x;
-}
-
-static inline void w_mstatus(uint64 x) {
-  asm volatile("csrw mstatus, %0" : : "r" (x));
-}
-
-static inline void w_satp(uint64 x) {
-  asm volatile("csrw satp, %0" : : "r" (x));
-}
-
-static inline uint64 r_satp() {
-  uint64 x;
-  asm volatile("csrr %0, satp" : "=r" (x) );
-  return x;
-}
-
-static inline void 
-w_stvec(uint64 x)
-{
-  asm volatile("csrw stvec, %0" : : "r" (x));
-}
-
-static inline void w_mepc(uint64 x) {
-  asm volatile("csrw mepc, %0" : : "r" (x));
-}
-
-// 刷新 TLB (虚拟地址转换缓存)
-static inline void sfence_vma() {
-  asm volatile("sfence.vma zero, zero");
-}
-
-// 4. 给 kalloc.c 用的辅助定义
-// 物理地址类型定义
+// kalloc 辅助类型
 typedef uint64 pte_t;
-typedef uint64 *pagetable_t; // 页表其实就是一个页表项数组
+typedef uint64 *pagetable_t;
 
-// 
-static inline uint64
-r_sepc()
-{
-  uint64 x;
-  asm volatile("csrr %0, sepc" : "=r" (x) );
-  return x;
+// ====================================================================
+// 4. 内联汇编辅助函数 (CSR Read/Write)
+// ====================================================================
+
+// --- K230 特有寄存器操作 ---
+static inline uint64 r_mxstatus() {
+    uint64 x; asm volatile("csrr %0, %1" : "=r" (x) : "i" (CSR_MXSTATUS)); return x;
 }
-static inline uint64
-r_sstatus()
-{
-  uint64 x;
-  asm volatile("csrr %0, sstatus" : "=r" (x) );
-  return x;
+static inline void w_mxstatus(uint64 x) {
+    asm volatile("csrw %0, %1" : : "i" (CSR_MXSTATUS), "r" (x));
 }
-// Supervisor Trap Cause
-static inline uint64
-r_scause()
-{
-  uint64 x;
-  asm volatile("csrr %0, scause" : "=r" (x) );
-  return x;
+static inline uint64 r_menvcfg() {
+    uint64 x; asm volatile("csrr %0, %1" : "=r" (x) : "i" (CSR_MENVCFG)); return x;
 }
-// Supervisor Trap Value
-static inline uint64
-r_stval()
-{
-  uint64 x;
-  asm volatile("csrr %0, stval" : "=r" (x) );
-  return x;
+static inline void w_menvcfg(uint64 x) {
+    asm volatile("csrw %0, %1" : : "i" (CSR_MENVCFG), "r" (x));
 }
-static inline uint64
-r_stvec()
-{
-  uint64 x;
-  asm volatile("csrr %0, stvec" : "=r" (x) );
-  return x;
+// Sstc: 直接写 stimecmp，不产生 ecall
+static inline void w_stimecmp(uint64 x) {
+    asm volatile("csrw 0x14D, %0" : : "r" (x));
 }
-// machine exception program counter, holds the
-// instruction address to which a return from
-// exception will go.
-static inline void 
-w_sepc(uint64 x)
-{
-  asm volatile("csrw sepc, %0" : : "r" (x));
+static inline uint64 r_stimecmp() {
+    uint64 x; asm volatile("csrr %0, 0x14D" : "=r" (x)); return x;
 }
-static inline void 
-w_sstatus(uint64 x)
-{
-  asm volatile("csrw sstatus, %0" : : "r" (x));
-}
+
+// --- 标准寄存器操作 ---
+static inline uint64 r_mstatus() { uint64 x; asm volatile("csrr %0, mstatus" : "=r" (x) ); return x; }
+static inline void w_mstatus(uint64 x) { asm volatile("csrw mstatus, %0" : : "r" (x)); }
+static inline void w_mepc(uint64 x) { asm volatile("csrw mepc, %0" : : "r" (x)); }
+static inline void w_satp(uint64 x) { asm volatile("csrw satp, %0" : : "r" (x)); }
+static inline uint64 r_satp() { uint64 x; asm volatile("csrr %0, satp" : "=r" (x) ); return x; }
+static inline void w_medeleg(uint64 x) { asm volatile("csrw medeleg, %0" : : "r" (x)); }
+static inline void w_mideleg(uint64 x) { asm volatile("csrw mideleg, %0" : : "r" (x)); }
+static inline void w_tp(uint64 x) { asm volatile("mv tp, %0" : : "r" (x)); }
+static inline void w_pmpcfg0(uint64 x) { asm volatile("csrw pmpcfg0, %0" : : "r" (x)); }
+static inline uint64 r_mhartid() { uint64 x; asm volatile("csrr %0, mhartid" : "=r" (x) ); return x; }
+static inline void w_mcounteren(uint64 x) { asm volatile("csrw mcounteren, %0" : : "r" (x)); }
+
+// S-mode Trap 相关
+static inline uint64 r_sepc() { uint64 x; asm volatile("csrr %0, sepc" : "=r" (x) ); return x; }
+static inline void w_sepc(uint64 x) { asm volatile("csrw sepc, %0" : : "r" (x)); }
+static inline uint64 r_sstatus() { uint64 x; asm volatile("csrr %0, sstatus" : "=r" (x) ); return x; }
+static inline void w_sstatus(uint64 x) { asm volatile("csrw sstatus, %0" : : "r" (x)); }
+static inline uint64 r_scause() { uint64 x; asm volatile("csrr %0, scause" : "=r" (x) ); return x; }
+static inline uint64 r_stval() { uint64 x; asm volatile("csrr %0, stval" : "=r" (x) ); return x; }
+static inline uint64 r_stvec() { uint64 x; asm volatile("csrr %0, stvec" : "=r" (x) ); return x; }
+static inline void w_stvec(uint64 x) { asm volatile("csrw stvec, %0" : : "r" (x)); }
+
+static inline uint64 r_sie() { uint64 x; asm volatile("csrr %0, sie" : "=r" (x)); return x; }
+static inline void w_sie(uint64 x) { asm volatile("csrw sie, %0" : : "r" (x)); }
+
+// 杂项
+static inline void sfence_vma() { asm volatile("sfence.vma zero, zero"); }
+static inline uint64 r_time() { uint64 x; asm volatile("csrr %0, time" : "=r" (x)); return x; }
+
+static inline void intr_on() { w_sstatus(r_sstatus() | SSTATUS_SIE); }
+static inline void intr_off() { w_sstatus(r_sstatus() & ~SSTATUS_SIE); }
+
 #endif // RISCV_H

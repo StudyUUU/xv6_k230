@@ -30,4 +30,8 @@ void check_mapping(uint64 va, uint64 expect_pa, int expect_perm, char *name);
 // trap.c
 void trap_init(void);
 
+// timer.c
+void set_timer(uint64 stime_value);
+void timerinit(void);
+
 #endif // DEFS_H

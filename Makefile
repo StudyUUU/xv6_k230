@@ -23,6 +23,7 @@ OBJS = \
   $K/vm.o \
   $K/kernelvec.o \
   $K/trap.o \
+  $K/timer.o \
   # 将来在这里添加 $K/vm.o $K/proc.o ...
 
 # 最终目标

@@ -10,34 +10,31 @@ void trap_init(void) {
     w_stvec((uint64)kernelvec);
 }
 
-// 所有的内核中断/异常都会跳到这里
-void kerneltrap(void) {
+void kerneltrap() {
     uint64 sepc = r_sepc();
     uint64 sstatus = r_sstatus();
     uint64 scause = r_scause();
 
-    if((sstatus & SSTATUS_SPP) == 0)
-        panic("kerneltrap: not from supervisor mode");
-
-    // 检查 scause 最高位，1=中断，0=异常
-    if((scause & 0x8000000000000000L) && (scause & 0xff) == 5) {
-        // Code 5 = Supervisor Timer Interrupt (时钟中断)
-        // 这一步在第二阶段实现，现在先留空或者打印个点
-        // printf("."); 
+    // 检查是否为中断 (最高位为1)
+    if(scause & 0x8000000000000000L) {
+        uint64 which_int = scause & 0xff;
         
-        // 重要：如果不处理时钟，需要暂时清除 Pending 位，否则会死循环
-        // 但最简单的办法是先别开时钟中断
-    } 
-    else {
-        // 异常处理 (Exception)
-        printf("Panic: scause %p pid %d\n", scause, 0);
+        // scause 5 = Supervisor Timer Interrupt
+        if(which_int == 5) { 
+            // 设置下一次闹钟，如果不加这句，闹钟只会响一次
+            set_timer(r_time() + CLOCK_INTERVAL);
+            
+            // 这里以后会加入 yield() 给进程调度
+        } else {
+            printf("unexpected interrupt: scause=%p\n", scause);
+        }
+    } else {
+        // 异常处理 (Page Fault 等)
+        printf("Panic: Exception scause %p\n", scause);
         printf("sepc=%p stval=%p\n", sepc, r_stval());
-        panic("Exception");
+        while(1);
     }
 
-    // 恢复 sepc 和 sstatus
-    // 因为 kerneltrap 内部如果发生了中断，这两个寄存器可能会被覆盖
-    // 所以需要在软件层面保存/恢复它们
     w_sepc(sepc);
     w_sstatus(sstatus);
 }
