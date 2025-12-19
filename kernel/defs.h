@@ -47,4 +47,7 @@ void initlock(struct spinlock *lk, char *name);
 void acquire(struct spinlock *lk);
 void release(struct spinlock *lk);
 
+// start.c
+void start_other_cores(void);
+
 #endif // DEFS_H
