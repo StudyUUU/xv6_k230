@@ -2,11 +2,13 @@
 
 void main()
 {
+    uartinit();
+
     printf("\n");
     printf("--------------------------------\n");
     printf("xv6 on K230: Hello from S-mode!\n");
     printf("--------------------------------\n");
-    
+
     kinit();
     printf("kinit success\n");
 
