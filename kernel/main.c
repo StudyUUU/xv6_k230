@@ -16,6 +16,9 @@ void main()
     kvminithart();
     printf("MMU is ON!\n");
     
+    cpuinit();
+    printf("cpuinit success (hartid=%d)\n", cpuid());
+    
     trap_init();
     printf("trap_init success\n");
 
@@ -24,6 +27,8 @@ void main()
 
     intr_on();
     printf("interrupts enabled\n");
+
+    printf("\nSystem ready.\n");
 
     while (1);
 }

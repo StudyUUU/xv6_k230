@@ -60,7 +60,7 @@ walk(pagetable_t pagetable, uint64 va, int alloc)
 // be page-aligned. Returns 0 on success, -1 if walk() couldn't
 // allocate a needed page-table page.
 int
-mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
+mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, uint64 perm)
 {
   uint64 a, last;
   pte_t *pte;
@@ -89,7 +89,7 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
 }
 
 // 辅助函数：简化 mappages 调用，如果失败直接死循环
-void kvmmap(pagetable_t pagetable, uint64 va, uint64 pa, uint64 sz, int perm) {
+void kvmmap(pagetable_t pagetable, uint64 va, uint64 pa, uint64 sz, uint64 perm) {
   if(mappages(pagetable, va, sz, pa, perm) != 0) {
     printf("kvmmap: failed to map 0x%p\n", va);
     while(1); // panic
@@ -102,34 +102,21 @@ pagetable_t kvmmake(void)
   pagetable_t kpgtbl;
 
   kpgtbl = (pagetable_t) kalloc();
-
-  // 在QEMU中A = Accessed，D = Dirty自动置位
-  // 在K230中硬件不自动置位 A / D，而软件又没有预先置位：那么每一次“访问内存 / 执行指令”，都会直接触发 Page Fault
-
-  // 1. 映射 UART
-  kvmmap(kpgtbl, UART0, UART0, PGSIZE, PTE_R | PTE_W | PTE_A | PTE_D);
-
-  // 2. [移除] VIRTIO (K230 没有这个)
-  // kvmmap(kpgtbl, VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W);
-
-  // 3. [移除] PLIC (K230 地址不同，暂时不映射)
-  // kvmmap(kpgtbl, PLIC, PLIC, 0x400000, PTE_R | PTE_W);
-
-  // 4. [精细映射] 内核代码段 (R-X)
-  // 范围: KERNBASE ~ etext
-  kvmmap(kpgtbl, KERNBASE, KERNBASE, (uint64)etext - KERNBASE, PTE_R | PTE_X | PTE_A);
-
-  // 5. [精细映射] 内核数据段 + 剩余物理内存 (RW-)
-  // 范围: etext ~ PHYSTOP
-  kvmmap(kpgtbl, (uint64)etext, (uint64)etext, PHYSTOP - (uint64)etext, PTE_R | PTE_W | PTE_A | PTE_D);
-
-  // 6. [暂时注释] Trampoline (跳板页)
-  // 等你写了 trampoline.S 后再开
-  // kvmmap(kpgtbl, TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X);
-
-  // 7. [暂时注释] 映射内核栈 (需要 proc.c)
-  // proc_mapstacks(kpgtbl);
+  memset(kpgtbl, 0, PGSIZE);  // 确保清零
   
+  // 1. 映射 UART
+  kvmmap(kpgtbl, UART0, UART0, PGSIZE, 
+         PTE_R | PTE_W | PTE_V | PTE_A | PTE_D);
+
+  // 4. 内核代码段 (R-X)
+  kvmmap(kpgtbl, KERNBASE, KERNBASE, (uint64)etext - KERNBASE, 
+         PTE_R | PTE_X | PTE_V | PTE_A | PTE_THEAD_MAEE);
+
+  // 5. 内核数据段 + 剩余物理内存 (RW-)
+  // *** 关键：必须加 PTE_THEAD_MAEE 才能支持 AMO 操作 ***
+  kvmmap(kpgtbl, (uint64)etext, (uint64)etext, PHYSTOP - (uint64)etext, 
+         PTE_R | PTE_W | PTE_V | PTE_A | PTE_D | PTE_THEAD_MAEE);
+
   return kpgtbl;
 }
 

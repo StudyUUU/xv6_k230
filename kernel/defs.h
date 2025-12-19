@@ -4,6 +4,9 @@
 #include "types.h"
 #include "riscv.h"
 
+// Forward declarations
+struct spinlock;
+
 // uart.c
 #define CMD_BUF_SIZE 36
 void printf(const char *fmt, ...);
@@ -22,7 +25,7 @@ void* memcpy(void *dst, const void *src, uint n);
 
 // vm.c
 pte_t *walk(pagetable_t pagetable, uint64 va, int alloc);
-int mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm);
+int mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, uint64 perm);
 void kvminit();
 void kvminithart();
 void check_mapping(uint64 va, uint64 expect_pa, int expect_perm, char *name);
@@ -33,5 +36,15 @@ void trap_init(void);
 // timer.c
 void set_timer(uint64 stime_value);
 void timerinit(void);
+
+// proc.c
+struct cpu*mycpu(void);
+int cpuid();
+void cpuinit();
+
+// spinlock.c
+void initlock(struct spinlock *lk, char *name);
+void acquire(struct spinlock *lk);
+void release(struct spinlock *lk);
 
 #endif // DEFS_H
