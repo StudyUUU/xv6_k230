@@ -7,6 +7,61 @@
 #include "defs.h"
 #include <stdarg.h>
 
+// ====================================================================
+// Part 1: SBI System Reset 接口 (用于优雅退出/重启)
+// ====================================================================
+
+// SBI Extension ID for System Reset
+#define SBI_EXT_SRST        0x53525354
+
+// SBI Function ID
+#define SBI_SRST_FID_RESET  0
+
+// Reset Types
+#define SBI_SRST_TYPE_SHUTDOWN    0
+#define SBI_SRST_TYPE_COLD_REBOOT 1
+#define SBI_SRST_TYPE_WARM_REBOOT 2
+
+// Reset Reasons
+#define SBI_SRST_REASON_NONE      0
+#define SBI_SRST_REASON_SYSTEM_FAILURE 1
+
+struct sbiret {
+    long error;
+    long value;
+};
+
+// 执行 SBI 调用 (内联汇编)
+static struct sbiret sbi_call(int ext, int fid, unsigned long arg0, unsigned long arg1, unsigned long arg2) {
+    struct sbiret ret;
+    register unsigned long a0 asm ("a0") = (unsigned long)(arg0);
+    register unsigned long a1 asm ("a1") = (unsigned long)(arg1);
+    register unsigned long a2 asm ("a2") = (unsigned long)(arg2);
+    register unsigned long a6 asm ("a6") = (unsigned long)(fid);
+    register unsigned long a7 asm ("a7") = (unsigned long)(ext);
+
+    asm volatile (
+        "ecall"
+        : "+r" (a0), "+r" (a1)
+        : "r" (a2), "r" (a6), "r" (a7)
+        : "memory"
+    );
+    ret.error = a0;
+    ret.value = a1;
+    return ret;
+}
+
+// 重启
+void sbi_reboot(void) {
+    printf("\n[SBI] System Rebooting...\n");
+    sbi_call(SBI_EXT_SRST, SBI_SRST_FID_RESET, SBI_SRST_TYPE_COLD_REBOOT, SBI_SRST_REASON_NONE, 0);
+    while(1); // Should not reach here
+}
+
+// ====================================================================
+// Part 2: UART 硬件寄存器定义
+// ====================================================================
+
 // K230 UART0 寄存器 (32位对齐)
 #define Reg(reg) ((volatile uint32 *)(UART0 + (reg) * 4))
 #define ReadReg(reg) (*(Reg(reg)))
@@ -35,12 +90,21 @@
 #define MSR 6                 // Modem Status Register
 #define USR 31                // UART Status Register (DesignWare extension)
 
+// ====================================================================
+// Part 3: UART 驱动逻辑
+// ====================================================================
+
 // 并发控制
 static struct spinlock uart_tx_lock;
 static struct spinlock uart_rx_lock;
 volatile int panicking = 0;   
 
-// ==================== 初始化 ====================
+// 环形缓冲区 (Ring Buffer)
+#define UART_RX_BUF_SIZE 32
+static char uart_rx_buf[UART_RX_BUF_SIZE];
+static uint64 uart_rx_w = 0; // 写索引
+static uint64 uart_rx_r = 0; // 读索引 (新增)
+
 void uartinit(void)
 {
     initlock(&uart_tx_lock, "uart");
@@ -52,8 +116,7 @@ void uartinit(void)
     // 2. 配置 8n1
     WriteReg(LCR, LCR_EIGHT_BITS);
     
-    // 3. 复位 FIFO，设置触发深度为 1 (Bit 7-6 = 00)
-    // 这一点很重要，如果触发深度太高，可能导致有数据但不报 RX 中断
+    // 3. 复位 FIFO
     WriteReg(FCR, FCR_FIFO_ENABLE | FCR_FIFO_CLEAR);
     
     // 4. 打开 OUT2
@@ -63,7 +126,7 @@ void uartinit(void)
     WriteReg(IER, IER_RX_ENABLE);
 }
 
-// ==================== 底层字符输出 ====================
+// --- 底层输出 ---
 static void uart_putc(char c)
 {
     if (panicking == 0) acquire(&uart_tx_lock);
@@ -90,7 +153,7 @@ void uart_puts(char *s)
     }
 }
 
-// ==================== 字符输入 ====================
+// --- 底层输入 (Polling) ---
 static int uart_getc_nowait(void)
 {
     if (ReadReg(LSR) & LSR_RX_READY) {
@@ -98,7 +161,35 @@ static int uart_getc_nowait(void)
     }
     return -1;
 }
-// ... printf 相关代码保持不变 ...
+
+// --- 高层输入 (Consumer, 供 console 使用) ---
+// 临时版本：由于 process/sleep 尚未实现，使用“忙等待”替代
+int uartgetc(void)
+{
+    while(1) {
+        acquire(&uart_rx_lock);
+        
+        // 检查缓冲区是否有数据
+        if(uart_rx_r != uart_rx_w){
+            int c = uart_rx_buf[uart_rx_r % UART_RX_BUF_SIZE];
+            uart_rx_r++;
+            release(&uart_rx_lock);
+            return c;
+        }
+        
+        // 缓冲区为空，释放锁让中断可以发生
+        release(&uart_rx_lock);
+        
+        // [TODO] 将来这里应该用 sleep(&uart_rx_r, &uart_rx_lock);
+        // 现在暂时空转等待
+        for(volatile int i=0; i<1000; i++); 
+    }
+}
+
+// ====================================================================
+// Part 4: Printf & Panic
+// ====================================================================
+
 static void print_hex(uint64 x, int uppercase) {
     char buf[17]; int i = 0;
     if (x == 0) { uart_putc('0'); return; }
@@ -135,16 +226,22 @@ void printf(const char *fmt, ...) {
     }
     va_end(ap);
 }
-int uart_getline(char *buf, int n) { return 0; }
+
+// 简单的 panic，死循环
+// 在未来可以修改为调用 sbi_shutdown() 或 sbi_reboot()
 void panic(const char *s) {
-    panicking = 1; printf("panic: %s\n", s); while(1);
+    panicking = 1; 
+    printf("panic: %s\n", s); 
+    // 遇到 panic 自动重启，避免必须手动硬复位
+    sbi_reboot(); 
+    // while(1);
 }
 
-// ==================== 中断处理 ====================
+// ====================================================================
+// Part 5: 中断处理 (Producer)
+// ====================================================================
 
-#define UART_RX_BUF_SIZE 32
-static char uart_rx_buf[UART_RX_BUF_SIZE];
-static uint64 uart_rx_w;
+#define CTRL_X 0x18 // Ctrl+X
 
 void uartintr(void)
 {
@@ -153,46 +250,49 @@ void uartintr(void)
         
         // IIR Bit 0: 0=Pending, 1=No Interrupt
         if (iir & 1) {
-            // [诊断关键] 检查 LSR 是否有数据残留 (Ghost Interrupt)
-            // 某些情况下，IIR 说无中断，但 LSR 仍显示 Data Ready
-            // 必须手动清除，否则中断线一直拉高
+            // [Ghost Interrupt Check]
             if (ReadReg(LSR) & LSR_RX_READY) {
                 int c = ReadReg(RHR) & 0xFF;
                 
-                // [关键] 恢复回显
+                // --- 紧急按键检查 ---
+                if (c == CTRL_X) sbi_reboot();
+                // ------------------
+
                 uart_putc(c); 
-                
                 acquire(&uart_rx_lock);
                 uart_rx_buf[uart_rx_w % UART_RX_BUF_SIZE] = c;
                 uart_rx_w++;
+                // [TODO] wakeup(&uart_rx_r); // 暂未实现进程，注释掉
                 release(&uart_rx_lock);
-                
-                continue; // 继续检查
+                continue; 
             }
-            
-            // 尝试读取 USR (DesignWare 特有) 以清除 Busy Detect
+            // 清除 Busy Detect
             volatile uint32 usr = ReadReg(USR);
             (void)usr;
-
-            break; // 真的没事了，退出
+            break; 
         }
 
-        // 正常 IIR 处理
         int id = iir & 0x0F;
         
         if (id == 4 || id == 12) { // RX Data
             int c = uart_getc_nowait();
             if(c != -1) {
-                // [关键] 恢复回显
-                uart_putc(c); 
+                // --- 紧急按键检查 ---
+                // Ctrl+X (0x18) -> 重启
+                if (c == CTRL_X) {
+                    sbi_reboot();
+                }
+                // ------------------
+
+                uart_putc(c); // 回显
                 
                 acquire(&uart_rx_lock);
                 uart_rx_buf[uart_rx_w % UART_RX_BUF_SIZE] = c;
                 uart_rx_w++;
+                // [TODO] wakeup(&uart_rx_r); // 暂未实现进程，注释掉
                 release(&uart_rx_lock);
             }
         } else {
-            // 其他中断，读状态寄存器清除
             volatile uint32 lsr = ReadReg(LSR);
             volatile uint32 msr = ReadReg(MSR);
             (void)lsr; (void)msr;
