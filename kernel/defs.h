@@ -7,54 +7,57 @@
 // Forward declarations
 struct spinlock;
 
-// uart.c
-void uartinit(void);  
+// sbi.c - SBI 接口
+void sbi_shutdown(void);
+void sbi_reboot(void);
+
+// uart.c - 串口驱动
+void uartinit(void);
 void uart_puts(char *s);
 void printf(const char *fmt, ...);
-int uart_getline(char *buf, int n);
+int uartgetc(void);
 void panic(const char *s);
-void uartintr(void);           // 新增
-void uart_intr_init(void);     // 新增
+void uartintr(void);
 
-// kalloc.c
+// kalloc.c - 物理内存分配
 void* kalloc(void);
 void kfree(void *);
 void kinit(void);
 
-// string.c
+// string.c - 字符串操作
 void* memset(void *dst, int c, uint n);
 void* memmove(void *dst, const void *src, uint n);
 void* memcpy(void *dst, const void *src, uint n);
 
-// vm.c
+// vm.c - 虚拟内存管理
 pte_t *walk(pagetable_t pagetable, uint64 va, int alloc);
 int mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, uint64 perm);
-void kvminit();
-void kvminithart();
+void kvminit(void);
+void kvminithart(void);
 void check_mapping(uint64 va, uint64 expect_pa, int expect_perm, char *name);
 
-// trap.c
+// trap.c - 陷阱处理
 void trap_init(void);
-int devintr(void);             // 新增
+int devintr(void);
 
-// timer.c
+// timer.c - 定时器
 void set_timer(uint64 stime_value);
 void timerinit(void);
 
-// proc.c
-struct cpu*mycpu(void);
-int cpuid();
-void cpuinit();
+// proc.c - 进程管理
+struct cpu* mycpu(void);
+int cpuid(void);
+void cpuinit(void);
 
-// spinlock.c
+// spinlock.c - 自旋锁
 void initlock(struct spinlock *lk, char *name);
 void acquire(struct spinlock *lk);
 void release(struct spinlock *lk);
 
-// plic.c
-void            plicinit(void);
-void            plicinithart(void);
-int             plic_claim(void);
-void            plic_complete(int);
+// plic.c - 平台级中断控制器
+void plicinit(void);
+void plicinithart(void);
+int plic_claim(void);
+void plic_complete(int);
 
 #endif // DEFS_H
