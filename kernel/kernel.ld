@@ -20,21 +20,25 @@ SECTIONS
   /* 【关键点】必须保留 .rodata，否则 printf 的字符串会丢失 */
   .rodata : {
     . = ALIGN(16);
-    *(.srodata .srodata.*)
+    *(.srodata .srodata.*) 
     . = ALIGN(16);
     *(.rodata .rodata.*)
   }
 
   .data : {
     . = ALIGN(16);
-    *(.sdata .sdata.*)
+    *(.sdata .sdata.*) 
     . = ALIGN(16);
     *(.data .data.*)
   }
 
+  /* 必须定义 edata，否则 entry.S 汇编无法找到符号 */
+  . = ALIGN(16);
+  PROVIDE(edata = .);
+
   .bss : {
     . = ALIGN(16);
-    *(.sbss .sbss.*)
+    *(.sbss .sbss.*) 
     . = ALIGN(16);
     *(.bss .bss.*)
   }

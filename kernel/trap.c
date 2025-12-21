@@ -8,8 +8,13 @@
 
 extern void kernelvec();
 
+uint64 uart_intr_count = 0;
+uint64 timer_intr_count = 0;
+uint64 last_timer_count = 0;
+
 void trap_init(void) {
     w_stvec((uint64)kernelvec);
+    printf("[trap_init] Counters initialized to 0\n");
 }
 
 // 设备中断分发
@@ -18,33 +23,34 @@ int devintr() {
     
     // 判断是否为外部中断 (最高位为1，低位为9)
     if((scause & 0x8000000000000000L) && (scause & 0xff) == 9) {
-        // 1. 获取中断号
         int irq = plic_claim();
         
-        // 2. 根据中断号分发处理
         if(irq == UART0_IRQ) {
-            // 如果是 1，说明是串口中断
             uartintr();
-            printf("[uartintr] Handled UART0 interrupt\n");
+            uart_intr_count++; 
         } else if (irq != 0) {
-            // 其他未预期的中断
             printf("unexpected interrupt irq=%d\n", irq);
         }
         
-        // 3. 告诉 PLIC 处理完成 (Complete)
         if(irq){
             plic_complete(irq);
-            printf("[plic_complete] Completed IRQ %d\n", irq);
         }
-
         
-        // 如果 claim 返回 0，说明没有中断需要处理，但仍然返回 1 表示外部中断路径已执行
         return 1;
 
     } else if(scause == 0x8000000000000005L) {
-        // 重新设置下一次中断时间 (这里需要适配 K230 的 STIMECMP 或 SBI)
+        // Timer 中断
         uint64 now = r_time();
         set_timer(now + CLOCK_INTERVAL); 
+        
+        timer_intr_count++;
+        
+        // 每 300 次 Timer 中断 (约 3秒) 打印一次统计
+        if(timer_intr_count - last_timer_count >= 300) {
+            // 使用 %ld 打印 int64
+            printf("[Stats] Timer: %ld | UART IRQs: %ld\n", timer_intr_count, uart_intr_count);
+            last_timer_count = timer_intr_count;
+        }
         
         return 2;
     } else {
@@ -58,17 +64,13 @@ void kerneltrap() {
     uint64 scause = r_scause();
 
     if(scause & 0x8000000000000000L) {
-        // 尝试处理设备中断
         int which_dev = devintr();
-        
         if(which_dev == 0){
-            // 未知中断类型
             printf("scause %p\n", scause);
             printf("sepc=%p stval=%p\n", sepc, r_stval());
             panic("kerneltrap: unknown interrupt");
         }
     } else {
-        // 异常
         printf("scause %p\n", scause);
         printf("sepc=%p stval=%p\n", sepc, r_stval());
         panic("kerneltrap: exception");
