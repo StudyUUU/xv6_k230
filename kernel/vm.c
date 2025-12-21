@@ -106,11 +106,11 @@ pagetable_t kvmmake(void)
   
   // 映射 UART
   kvmmap(kpgtbl, UART0, UART0, PGSIZE, 
-         PTE_R | PTE_W | PTE_A | PTE_D);
+         PTE_R | PTE_W | PTE_A | PTE_D | PTE_IO);
 
   // 映射 PLIC：虚拟地址 0x10000000 -> 物理地址 0xf00000000
   // 注意：这里使用 PLIC_PA 作为物理地址，PLIC 作为虚拟地址
-  kvmmap(kpgtbl, PLIC, PLIC_PA, 0x4000000, PTE_R | PTE_W | PTE_A | PTE_D | PTE_THEAD_MAEE);
+  kvmmap(kpgtbl, PLIC, PLIC_PA, 0x4000000, PTE_R | PTE_W | PTE_A | PTE_D | PTE_IO);
 
   // 映射内核代码段
   kvmmap(kpgtbl, KERNBASE, KERNBASE, (uint64)etext - KERNBASE, 

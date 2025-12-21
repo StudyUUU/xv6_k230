@@ -1,5 +1,8 @@
 #include "types.h"
-#include "riscv.h" // 包含所有寄存器宏和函数
+#include "param.h"
+#include "memlayout.h"
+#include "riscv.h"
+#include "defs.h"
 
 // PMP 配置位定义 (仅在 start.c 中使用)
 #define PMP_R       0x01
@@ -24,52 +27,42 @@ void start()
     w_mstatus(x);
 
     // 2. 异常与中断委托
-    // -----------------------------------------------------------
-    // 委托所有异常，但【排除】S-mode Ecall (bit 9)。
-    // 即使我们用了 Sstc，也防止意外的 ecall 导致死循环。
     w_medeleg(0xffff & ~(1 << 9));
-    
-    // 委托所有中断 (软中断、时钟中断、外部中断)
     w_mideleg(0xffff);  
-    w_sie(r_sie() | SIE_SEIE | SIE_STIE);
+    w_sie(r_sie() | SIE_SEIE | SIE_STIE | SIE_SSIE);
 
     // 3. 【K230 (C908) 核心特性配置】
-    // -----------------------------------------------------------
-    // 开启 MXSTATUS.CLINTEE (Bit 17): 允许 S-mode 响应 CLINT 中断
     uint64 mxs = r_mxstatus();
     mxs |= MXSTATUS_CLINTEE;
     mxs |= MXSTATUS_THEADISAEE; // 允许玄铁扩展指令
     w_mxstatus(mxs);
 
-    // 开启 MENVCFG.STCE (Bit 63): Sstc 扩展
-    // 允许 S-mode 直接写 stimecmp 寄存器，无需 SBI 调用
+    // 开启 MENVCFG.STCE
     uint64 menv = r_menvcfg();
     menv |= MENVCFG_STCE;
     w_menvcfg(menv);
 
-    // 允许 S-mode 访问所有硬件计数器 (time, cycle...)
     w_mcounteren(0xffffffff);
     
-    // 4. 跳转准备
+    // 4. [关键步骤] 解锁并验证 PLIC_CTRL (必须在 M-Mode 且无 Cache 干扰时进行)
+    volatile uint32 *plic_ctrl_pa = (uint32*)(PLIC_PA + 0x01FFFFC);
+    *plic_ctrl_pa = 1;
+    
+    // 简单验证
+    if (*plic_ctrl_pa == 1) {
+         uart_puts("PLIC: Control unlocked SUCCESS\n");
+    } else {
+         uart_puts("PLIC: Control unlock FAILED (Is this real hardware?)\n");
+    }
+
+    // 5. 跳转准备
     w_mepc((uint64)main);
     w_satp(0);
 
-    // 5. PMP 配置
-    // -----------------------------------------------------------
-    // K230 OpenSBI 锁定了 PMP Entry 0，我们使用 Entry 3 覆盖全内存
-    
-    // pmpaddr3 = -1 (覆盖所有 64位地址空间)
+    // 6. PMP 配置
     asm volatile("csrw pmpaddr3, %0" : : "r" (-1ULL));
-
-    // pmpcfg0: 配置 Entry 3 (Bits 24-31)
-    // R/W/X 权限 + NAPOT 模式
     uint64 cfg = (PMP_R | PMP_W | PMP_X | PMP_A_NAPOT) << 24;
     w_pmpcfg0(cfg);
-
-    // 6. **M-mode 配置 PLIC 中断使能（使用物理地址）**
-    volatile uint32 *mie0 = (uint32*)(0x0f00000000L + 0x2000);
-    *mie0 = (1 << 18);  // 启用 IRQ 18 (UART0)
-    uart_puts("PLIC: Enabled IRQ 18 in M-mode\n");
 
     // 7. 切换到 S-mode
     int id = r_mhartid();

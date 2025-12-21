@@ -68,6 +68,15 @@
 // MAEE = Memory Access Extension Enable
 // K230 的 C908 核心需要这个位来启用缓存和原子操作
 #define PTE_THEAD_MAEE  ((1L << 62) | (1L << 61) | (1L << 60))
+// [新增] T-Head C908 特有页表属性
+// Bit 63: Strong Order (SO) - 用于 MMIO 设备，禁止 Cache 和乱序
+// Bit 62: Cacheable (C) - 用于内存
+// Bit 61: Bufferable (B)
+// Bit 60: Shareable (S)
+// Bit 59: Secondary (Sec)
+// 我们定义一个 PTE_IO 宏，专门用于映射外设
+#define PTE_THEAD_SO   (1L << 63)
+#define PTE_IO         (PTE_R | PTE_W | PTE_THEAD_SO)
 
 // PTE 与物理地址转换
 #define PA2PTE(pa) ((((uint64)pa) >> 12) << 10)  // 物理地址 → PTE
