@@ -32,15 +32,17 @@
 
 // 并发控制
 static struct spinlock uart_tx_lock;
+static struct spinlock uart_rx_lock;
 volatile int panicking = 0;   // 在 panic 时设为 1
 
 // ==================== 初始化 ====================
 void uartinit(void)
 {
-    // 初始化锁（必须在使用前调用！）
+    // 初始化锁
     initlock(&uart_tx_lock, "uart");
+    initlock(&uart_rx_lock, "uart_rx");
     
-    // 禁用中断（先用轮询模式，后续可改为中断驱动）
+    // 配置前先禁用中断
     WriteReg(IER, 0x00);
     
     // K230 的 UART 波特率可能由 bootloader 配置好了
@@ -58,8 +60,7 @@ void uartinit(void)
     // 启用 FIFO 并清空
     WriteReg(FCR, FCR_FIFO_ENABLE | FCR_FIFO_CLEAR);
     
-    // 暂时不启用中断（保持轮询模式）
-    // WriteReg(IER, IER_RX_ENABLE | IER_TX_ENABLE);
+    WriteReg(IER, IER_RX_ENABLE | IER_TX_ENABLE);
 }
 
 // ==================== 底层字符输出（带并发保护）====================
@@ -245,4 +246,38 @@ void panic(const char *s)
     // 停止所有核心
     while (1)
         ;
+}
+
+// ==================== UART 中断处理 ====================
+
+#define UART_TX_BUF_SIZE 32
+#define UART_RX_BUF_SIZE 32
+
+// 发送缓冲区
+// static char uart_tx_buf[UART_TX_BUF_SIZE];
+// static uint64 uart_tx_w; // 写指针
+// static uint64 uart_tx_r; // 读指针
+
+// 接收缓冲区
+static char uart_rx_buf[UART_RX_BUF_SIZE];
+static uint64 uart_rx_w;
+// static uint64 uart_rx_r;
+
+// UART 中断处理函数
+void uartintr(void)
+{
+    // 处理接收中断
+    while(1) {
+        int c = uart_getc_nowait();
+        if(c == -1)
+            break;
+        
+        // 简单回显
+        uart_putc(c);
+        
+        acquire(&uart_rx_lock);
+        uart_rx_buf[uart_rx_w % UART_RX_BUF_SIZE] = c;
+        uart_rx_w++;
+        release(&uart_rx_lock);
+    }
 }

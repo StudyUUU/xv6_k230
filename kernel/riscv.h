@@ -187,6 +187,13 @@ static inline void w_sie(uint64 x) {
     asm volatile("csrw sie, %0" : : "r" (x));
 }
 
+static inline uint64 r_sip() {
+    uint64 x; asm volatile("csrr %0, sip" : "=r" (x)); return x;
+}
+static inline void w_sip(uint64 x) {
+    asm volatile("csrw sip, %0" : : "r" (x));
+}
+
 // SATP (地址翻译与保护)
 static inline uint64 r_satp() {
     uint64 x; asm volatile("csrr %0, satp" : "=r" (x)); return x;

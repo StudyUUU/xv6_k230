@@ -1,13 +1,38 @@
 #include "types.h"
-#include "riscv.h" // 包含读写 CSR 寄存器的宏
+#include "riscv.h"
 #include "defs.h"
 
 extern void kernelvec();
 
 void trap_init(void) {
-    // 将 kernelvec 的地址写入 stvec 寄存器
-    // 并且模式设为 Direct (末位为0)，所有中断都跳到同一个地址
     w_stvec((uint64)kernelvec);
+}
+
+// 设备中断分发
+int devintr() {
+    uint64 scause = r_scause();
+    
+    if((scause & 0x8000000000000000L) && (scause & 0xff) == 9) {
+        // 外部中断 (PLIC)
+        int irq = plic_claim();
+        printf("devintr: irq=%d\n", irq);
+        if(irq == 0) {
+            uartintr();
+        } else if(irq) {
+            printf("unexpected interrupt irq=%d\n", irq);
+        }
+        
+        if(irq)
+            plic_complete(irq);
+        
+        return 1;
+    } else if(scause == 0x8000000000000005L) {
+        // 定时器中断
+        set_timer(r_time() + CLOCK_INTERVAL);
+        return 2;
+    } else {
+        return 0;
+    }
 }
 
 void kerneltrap() {
@@ -15,24 +40,14 @@ void kerneltrap() {
     uint64 sstatus = r_sstatus();
     uint64 scause = r_scause();
 
-    // 检查是否为中断 (最高位为1)
     if(scause & 0x8000000000000000L) {
-        uint64 which_int = scause & 0xff;
-        
-        // scause 5 = Supervisor Timer Interrupt
-        if(which_int == 5) { 
-            // 设置下一次闹钟，如果不加这句，闹钟只会响一次
-            set_timer(r_time() + CLOCK_INTERVAL);
-            
-            // 这里以后会加入 yield() 给进程调度
-        } else {
-            printf("unexpected interrupt: scause=%p\n", scause);
-        }
+        // 中断
+        devintr();
     } else {
-        // 异常处理 (Page Fault 等)
-        printf("Panic: Exception scause %p\n", scause);
+        // 异常
+        printf("scause %p\n", scause);
         printf("sepc=%p stval=%p\n", sepc, r_stval());
-        while(1);
+        panic("kerneltrap");
     }
 
     w_sepc(sepc);

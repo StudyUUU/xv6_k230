@@ -31,6 +31,7 @@ void start()
     
     // 委托所有中断 (软中断、时钟中断、外部中断)
     w_mideleg(0xffff);  
+    w_sie(r_sie() | SIE_SEIE | SIE_STIE);
 
     // 3. 【K230 (C908) 核心特性配置】
     // -----------------------------------------------------------
@@ -51,9 +52,9 @@ void start()
     
     // 4. 跳转准备
     w_mepc((uint64)main);
-    w_satp(0); // 暂时禁用 MMU
+    w_satp(0);
 
-    // 5. 【PMP 物理内存保护配置】
+    // 5. PMP 配置
     // -----------------------------------------------------------
     // K230 OpenSBI 锁定了 PMP Entry 0，我们使用 Entry 3 覆盖全内存
     
@@ -65,12 +66,16 @@ void start()
     uint64 cfg = (PMP_R | PMP_W | PMP_X | PMP_A_NAPOT) << 24;
     w_pmpcfg0(cfg);
 
-    // 6. 切换到 S-mode
+    // 6. **M-mode 配置 PLIC 中断使能（使用物理地址）**
+    volatile uint32 *mie0 = (uint32*)(0x0f00000000L + 0x2000);
+    *mie0 = (1 << 18);  // 启用 IRQ 18 (UART0)
+    uart_puts("PLIC: Enabled IRQ 18 in M-mode\n");
+
+    // 7. 切换到 S-mode
     int id = r_mhartid();
     w_tp(id);
 
     uart_puts("mret to S-mode main\n"); 
-
     asm volatile("fence.i"); 
     asm volatile("mret"); 
 }

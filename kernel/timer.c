@@ -12,6 +12,4 @@ void timerinit(void) {
     
     // 设置第一次闹钟
     set_timer(r_time() + CLOCK_INTERVAL);
-    
-
 }

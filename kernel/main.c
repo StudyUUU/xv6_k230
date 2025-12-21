@@ -1,13 +1,14 @@
 #include "defs.h"
+#include "memlayout.h"
 
+// ============ kernel/main.c 添加调试信息 ============
 void main()
 {
     uartinit();
 
     printf("\n");
-    printf("--------------------------------\n");
-    printf("xv6 on K230: Hello from S-mode!\n");
-    printf("--------------------------------\n");
+    printf("xv6 kernel is booting\n");
+    printf("\n");
 
     kinit();
     printf("kinit success\n");
@@ -24,13 +25,19 @@ void main()
     trap_init();
     printf("trap_init success\n");
 
+    plicinit();
+    printf("plicinit success\n");
+
+    plicinithart();
+    printf("plicinithart success\n");
+
     timerinit();
     printf("timerinit success. interval = %d\n", CLOCK_INTERVAL);
 
     intr_on();
-    printf("interrupts enabled\n");
 
-    printf("\nSystem ready.\n");
+    printf("hart %d starting\n", cpuid());
 
-    while (1);
+    while(1)
+        ;
 }

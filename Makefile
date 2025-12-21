@@ -26,6 +26,7 @@ OBJS = \
   $K/timer.o \
   $K/spinlock.o \
   $K/proc.o \
+  $K/plic.o \
   # 将来在这里添加 $K/vm.o $K/proc.o ...
 
 # 最终目标

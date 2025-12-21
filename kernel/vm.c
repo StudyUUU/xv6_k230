@@ -102,20 +102,23 @@ pagetable_t kvmmake(void)
   pagetable_t kpgtbl;
 
   kpgtbl = (pagetable_t) kalloc();
-  memset(kpgtbl, 0, PGSIZE);  // 确保清零
+  memset(kpgtbl, 0, PGSIZE);
   
-  // 1. 映射 UART
+  // 映射 UART
   kvmmap(kpgtbl, UART0, UART0, PGSIZE, 
-         PTE_R | PTE_W | PTE_V | PTE_A | PTE_D);
+         PTE_R | PTE_W | PTE_A | PTE_D);
 
-  // 4. 内核代码段 (R-X)
+  // 映射 PLIC：虚拟地址 0x10000000 -> 物理地址 0xf00000000
+  // 注意：这里使用 PLIC_PA 作为物理地址，PLIC 作为虚拟地址
+  kvmmap(kpgtbl, PLIC, PLIC_PA, 0x4000000, PTE_R | PTE_W | PTE_A | PTE_D | PTE_THEAD_MAEE);
+
+  // 映射内核代码段
   kvmmap(kpgtbl, KERNBASE, KERNBASE, (uint64)etext - KERNBASE, 
-         PTE_R | PTE_X | PTE_V | PTE_A | PTE_THEAD_MAEE);
+         PTE_R | PTE_X | PTE_A | PTE_THEAD_MAEE);
 
-  // 5. 内核数据段 + 剩余物理内存 (RW-)
-  // *** 关键：必须加 PTE_THEAD_MAEE 才能支持 AMO 操作 ***
+  // 映射内核数据段
   kvmmap(kpgtbl, (uint64)etext, (uint64)etext, PHYSTOP - (uint64)etext, 
-         PTE_R | PTE_W | PTE_V | PTE_A | PTE_D | PTE_THEAD_MAEE);
+         PTE_R | PTE_W | PTE_A | PTE_D | PTE_THEAD_MAEE);
 
   return kpgtbl;
 }
