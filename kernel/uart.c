@@ -98,14 +98,6 @@ static int uart_getc_nowait(void)
     }
     return -1;
 }
-
-// static int uart_getc(void)
-// {
-//     int c;
-//     while ((c = uart_getc_nowait()) == -1);
-//     return c;
-// }
-
 // ... printf 相关代码保持不变 ...
 static void print_hex(uint64 x, int uppercase) {
     char buf[17]; int i = 0;
