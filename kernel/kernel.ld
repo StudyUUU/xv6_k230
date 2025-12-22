@@ -12,8 +12,7 @@ SECTIONS
     _trampoline = .;
     *(trampsec)
     . = ALIGN(0x1000);
-    /* 暂时移除 ASSERT，防止因为还没写 trampoline.S 导致编译报错 */
-    /* ASSERT(. - _trampoline == 0x1000, "error: trampoline larger than one page"); */
+    ASSERT(. - _trampoline == 0x1000, "error: trampoline larger than one page");
     PROVIDE(etext = .);
   }
 

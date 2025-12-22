@@ -77,3 +77,23 @@ void kerneltrap() {
     w_sepc(sepc);
     w_sstatus(sstatus);
 }
+
+void usertrap(void) {
+  // 1. 确认我们是因为系统调用进来的
+  uint64 scause = r_scause();
+  
+  printf("\n=== [usertrap] TRAP CAUGHT! ===\n");
+  printf("scause: %p\n", scause);
+  printf("sepc:   %p\n", r_sepc());
+  printf("stval:  %p\n", r_stval());
+
+  if(scause == 8) {
+      // scause 8 代表 "Environment call from U-mode"
+      printf("SUCCESS: Verified U-mode execution and return!\n");
+      printf("System Halted.\n");
+      for(;;); // 测试通过，停机
+  } else {
+      printf("Unexpected Trap! (Maybe Page Fault?)\n");
+      panic("usertrap");
+  }
+}

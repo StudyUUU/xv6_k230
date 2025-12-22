@@ -1,6 +1,9 @@
 #ifndef TYPES_H
 #define TYPES_H
 
+// 只在 C 代码中定义类型，汇编代码跳过
+#ifndef __ASSEMBLER__
+
 typedef unsigned int   uint;
 typedef unsigned short ushort;
 typedef unsigned char  uchar;
@@ -17,5 +20,7 @@ typedef int int32;
 typedef long int64;
 
 typedef uint64 pde_t;
+
+#endif // __ASSEMBLER__
 
 #endif // TYPES_H

@@ -1,7 +1,10 @@
 #ifndef RISCV_H
 #define RISCV_H
 
+// 汇编代码不需要包含 types.h
+#ifndef __ASSEMBLER__
 #include "types.h"
+#endif
 
 // ====================================================================
 // 1. K230/C908 特有扩展
@@ -91,6 +94,11 @@
 // SATP 寄存器配置
 #define SATP_SV39 (8L << 60)                     // Sv39 模式
 #define MAKE_SATP(pagetable) (SATP_SV39 | (((uint64)pagetable) >> 12))
+
+// ====================================================================
+// C 语言专用部分（类型定义和内联函数）
+// ====================================================================
+#ifndef __ASSEMBLER__
 
 // 类型定义
 typedef uint64 pte_t;        // 页表项类型
@@ -249,5 +257,7 @@ static inline int intr_get() {
     uint64 x = r_sstatus();
     return (x & SSTATUS_SIE) != 0;
 }
+
+#endif // __ASSEMBLER__
 
 #endif // RISCV_H

@@ -44,4 +44,12 @@
 // 6. 虚拟内存映射
 #define KERN_VIRT_BASE 0x80000000L
 
+// 7. 用户栈和陷阱帧位置
+#define TRAMPOLINE (MAXVA - PGSIZE)
+#define TRAPFRAME (TRAMPOLINE - PGSIZE)
+
+// map kernel stacks beneath the trampoline,
+// each surrounded by invalid guard pages.
+#define KSTACK(p) (TRAMPOLINE - ((p)+1)* 2*PGSIZE)
+
 #endif // MEMLAYOUT_H
