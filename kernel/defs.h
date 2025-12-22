@@ -6,6 +6,7 @@
 
 // Forward declarations
 struct spinlock;
+struct context;
 
 // sbi.c - SBI 接口
 void sbi_shutdown(void);
@@ -48,16 +49,26 @@ void timerinit(void);
 struct cpu* mycpu(void);
 int cpuid(void);
 void cpuinit(void);
+void push_off(void);
+void pop_off(void);
 
 // spinlock.c - 自旋锁
 void initlock(struct spinlock *lk, char *name);
 void acquire(struct spinlock *lk);
 void release(struct spinlock *lk);
-
+int holding(struct spinlock *lk);
 // plic.c - 平台级中断控制器
 void plicinit(void);
 void plicinithart(void);
 int plic_claim(void);
 void plic_complete(int);
+
+// swtch.S - 上下文切换
+void swtch(struct context*, struct context*);
+
+// proc.c - 进程管理
+void procinit(void);
+void test_proc_init(void);
+void scheduler(void);
 
 #endif // DEFS_H

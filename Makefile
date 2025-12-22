@@ -28,6 +28,7 @@ OBJS = \
   $K/proc.o \
   $K/plic.o \
   $K/sbi.o \
+  $K/swtch.o\
   # 将来在这里添加 $K/vm.o $K/proc.o ...
 
 # 最终目标

@@ -8,11 +8,6 @@
 #include "proc.h"
 #include "defs.h"
 
-// Forward declarations
-static int holding(struct spinlock *lk);
-static void push_off(void);
-static void pop_off(void);
-
 void
 initlock(struct spinlock *lk, char *name)
 {
@@ -78,7 +73,7 @@ release(struct spinlock *lk)
 
 // Check whether this cpu is holding the lock.
 // Interrupts must be off.
-static int
+int
 holding(struct spinlock *lk)
 {
   int r;
@@ -90,7 +85,7 @@ holding(struct spinlock *lk)
 // it takes two pop_off()s to undo two push_off()s.  Also, if interrupts
 // are initially off, then push_off, pop_off leaves them off.
 
-static void
+void
 push_off(void)
 {
   int old = intr_get();
@@ -104,7 +99,7 @@ push_off(void)
   mycpu()->noff += 1;
 }
 
-static void
+void
 pop_off(void)
 {
   struct cpu *c = mycpu();
