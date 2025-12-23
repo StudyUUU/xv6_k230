@@ -13,6 +13,7 @@ void trap_init(void) {
     w_stvec((uint64)kernelvec);
 }
 
+
 // 内核态中断/异常入口程序
 void kerneltrap() {
     uint64 sepc = r_sepc();
@@ -78,22 +79,50 @@ void kerneltrap() {
     w_sstatus(sstatus);
 }
 
-void usertrap(void) {
-  // 1. 确认我们是因为系统调用进来的
-  uint64 scause = r_scause();
-  
-  printf("\n=== [usertrap] TRAP CAUGHT! ===\n");
-  printf("scause: %p\n", scause);
-  printf("sepc:   %p\n", r_sepc());
-  printf("stval:  %p\n", r_stval());
+uint64
+usertrap(void)
+{
+    struct proc *p = myproc();
+    
+    if((r_sstatus() & SSTATUS_SPP) != 0)
+        panic("usertrap: not from user");
 
-  if(scause == 8) {
-      // scause 8 代表 "Environment call from U-mode"
-      printf("SUCCESS: Verified U-mode execution and return!\n");
-      printf("System Halted.\n");
-      for(;;); // 测试通过，停机
-  } else {
-      printf("Unexpected Trap! (Maybe Page Fault?)\n");
-      panic("usertrap");
-  }
+    // 在处理用户陷阱时，将中断向量切换回内核模式的 kernelvec
+    w_stvec((uint64)kernelvec);
+
+    uint64 scause = r_scause();
+    uint64 sepc   = r_sepc();
+    uint64 stval  = r_stval();
+
+    // 保存用户程序的 pc，以便后续恢复或修改
+    p->trapframe->epc = sepc;
+
+    if(scause == 8){
+        printf("[usertrap] System call from user mode\n");
+        // 系统调用 (ecall from U-mode)
+        
+        // // 检查进程是否已被杀死 (可选)
+        // if(p->killed)
+        //     exit(-1);
+
+        // sepc 指向的是 ecall 指令，返回后需要执行下一条指令
+        p->trapframe->epc += 4;
+
+        // 这里以后可以调用 syscall() 处理具体的系统调用
+        // syscall();
+    } else if(scause == 0x8000000000000005L){
+        // 时钟中断 (Supervisor timer interrupt)
+        // K230 使用 Sstc，需要重置 stimecmp 以清除中断并预设下一次中断
+        set_timer(r_time() + CLOCK_INTERVAL);
+        // 可以在这里调用 yield() 让出 CPU 给其他进程
+        // yield();
+    } else {
+        printf("\n[usertrap] Unexpected scause %p\n", scause);
+        printf("[usertrap] sepc=%p stval=%p\n", sepc, stval);
+        panic("usertrap");
+    }
+
+    prepare_return();
+
+    return MAKE_SATP(p->pagetable);
 }

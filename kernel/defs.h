@@ -41,11 +41,18 @@ void kvmmap(pagetable_t pagetable, uint64 va, uint64 pa, uint64 sz, uint64 perm)
 pagetable_t proc_pagetable(struct proc *p);
 void uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free);
 void uvmfree(pagetable_t pagetable, uint64 sz);
+uint64 uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz, int xperm);
+uint64 uvmdealloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz);
+void uvminit(pagetable_t pagetable, uchar *src, uint sz);
+int uvmcopy(pagetable_t old, pagetable_t new, uint64 sz);
+int copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len);
+int copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len);
+int copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max);
 
 // trap.c - 陷阱处理
 void trap_init(void);
 int devintr(void);
-void usertrap(void);
+uint64 usertrap(void);
 
 // timer.c - 定时器
 void set_timer(uint64 stime_value);
@@ -61,7 +68,7 @@ void proc_mapstacks(pagetable_t kpgtbl);
 void procinit(void);
 void test_proc_init(void);
 void scheduler(void);
-
+void userinit(void);
 // spinlock.c - 自旋锁
 void initlock(struct spinlock *lk, char *name);
 void acquire(struct spinlock *lk);
@@ -76,6 +83,10 @@ void plic_complete(int);
 
 // swtch.S - 上下文切换
 void swtch(struct context*, struct context*);
+
+//
+void prepare_return(void);
+struct proc* myproc(void);
 
 // trampoline.S - 用户态/内核态切换
 extern char trampoline[];  // trampoline 页的起始地址

@@ -82,12 +82,14 @@ scheduler(void)
     for(p = proc; p < &proc[NPROC]; p++) {
       acquire(&p->lock);
       if(p->state == RUNNABLE) {
+        printf("[Scheduler] CPU %d: Switching to process %d\n", cpuid(), p->pid);
+        printf("process name: %s\n",p->name);
         // 切换到选定的进程
         // 进程的工作是释放其锁，然后在跳回调度器之前重新获取锁
         p->state = RUNNING;
         c->proc = p;
         swtch(&c->context, &p->context);
-
+        printf("[Scheduler] CPU %d: Returned from process %d\n", cpuid(), p->pid);
         // 进程现在运行完毕
         // 它应该在返回之前已经改变了 p->state
         c->proc = 0;
@@ -217,6 +219,9 @@ proc_mapstacks(pagetable_t kpgtbl)
     if(pa == 0)
       panic("kalloc");
     uint64 va = KSTACK((int) (p - proc));
+
+    p->kstack = va;
+
     kvmmap(kpgtbl, va, (uint64)pa, PGSIZE, PTE_R | PTE_W | PTE_THEAD_MAEE | PTE_A | PTE_D);
   }
 }
@@ -289,6 +294,8 @@ prepare_return(void)
 void
 forkret(void)
 {
+  printf("forkret entered\n");
+
   extern char userret[];
   static int first = 1;
   struct proc *p = myproc();
@@ -303,9 +310,12 @@ forkret(void)
     first = 0;
 
   }
-
+  // --- 实验：在 C 代码里直接写 ---
+  *(volatile char*)0x91400000 = 'X';
   // return to user space, mimicing usertrap()'s return.
   prepare_return();
+  *(volatile char*)0x91400000 = 'Y';
+  
   uint64 satp = MAKE_SATP(p->pagetable);
   uint64 trampoline_userret = TRAMPOLINE + (userret - trampoline);
   ((void (*)(uint64))trampoline_userret)(satp);
@@ -367,7 +377,7 @@ found:
 }
 
 uchar initcode[] = {
-  0x73, 0x00, 0x00, 0x00
+  0x6f, 0x00, 0x00, 0x00
 };
 // Set up first user process.
 void
@@ -377,7 +387,16 @@ userinit(void)
 
   p = allocproc();
   initproc = p;
-  
+  initproc->name = "initcode";
+  // allocate one user page and copy initcode's instructions
+  // and data into it.
+  uvminit(p->pagetable, initcode, sizeof(initcode));
+  p->sz = PGSIZE;
+
+  // prepare for the very first "return" from kernel to user.
+  p->trapframe->epc = 0;      // user program counter
+  p->trapframe->sp = PGSIZE;  // user stack pointer
+
   p->state = RUNNABLE;
 
   release(&p->lock);
