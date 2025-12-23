@@ -43,10 +43,8 @@ walk(pagetable_t pagetable, uint64 va, int alloc)
       // 如果无效，且 alloc 为 0，说明查找失败
       if(!alloc || (pagetable = (pagetable_t)kalloc()) == 0)
         return 0;
-      
-      // 如果 alloc 为 1，我们刚分配了一个新页作为下一级页表
-      // 这里的 memset 已经在 kalloc 里做过了，为了保险可以不写，但为了严谨最好确认一下
-      // memset(pagetable, 0, PGSIZE); 
+
+      memset(pagetable, 0, PGSIZE); 
       
       // 将新页表的物理地址写入当前 PTE，并标记为有效 (V)
       *pte = PA2PTE(pagetable) | PTE_V;
@@ -163,9 +161,11 @@ void kvminit(void)
   kernel_pagetable = kvmmake();
 }
 
-
 // 开启分页机制 (激活地图)
 void kvminithart() {
+  // 等待之前对页表内存的写入完成
+  sfence_vma();
+
   // 写入 satp 寄存器
   // MAKE_SATP 宏在 riscv.h 中定义，设置模式为 Sv39 并填入根页表物理页号
   w_satp(MAKE_SATP(kernel_pagetable));
@@ -173,35 +173,6 @@ void kvminithart() {
   // 刷新 TLB (快表)
   // 必须执行！否则 CPU 可能还缓存着旧的地址转换规则
   sfence_vma();
-}
-
-// 辅助验证函数
-void check_mapping(uint64 va, uint64 expect_pa, int expect_perm, char *name) {
-    pte_t *pte = walk(kernel_pagetable, va, 0); // 只查找，不分配
-
-    printf("Check %s (VA: %p): ", name, va);
-    
-    if (pte == 0 || (*pte & PTE_V) == 0) {
-        printf("FAIL! Not mapped.\n");
-        return;
-    }
-
-    uint64 pa = PTE2PA(*pte);
-    int perm = PTE_FLAGS(*pte) & 0x3FF; // 取出标志位
-
-    // 检查物理地址
-    if (pa != expect_pa) {
-        printf("FAIL! PA mismatch. Got %p, Expect %p\n", pa, expect_pa);
-        return;
-    }
-
-    // 检查权限 (必须包含期望的权限位)
-    if ((perm & expect_perm) != expect_perm) {
-        printf("FAIL! Perm mismatch. Got 0x%x, Expect 0x%x\n", perm, expect_perm);
-        return;
-    }
-
-    printf("PASS. (PA: %p, Flags: 0x%x)\n", pa, perm);
 }
 
 void
@@ -278,7 +249,7 @@ proc_pagetable(struct proc *p)
               TRAMPOLINE,
               PGSIZE,
               (uint64)trampoline,
-              PTE_R | PTE_X | PTE_A | PTE_THEAD_MAEE) < 0)
+              PTE_R | PTE_X | PTE_A) < 0)
     goto bad;
 
   // trapframe: 只给 S-mode 用，但在用户页表里

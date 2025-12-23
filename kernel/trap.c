@@ -6,13 +6,15 @@
 #include "proc.h"
 #include "defs.h"
 
+struct spinlock tickslock;
+
 extern void kernelvec();
 
 void trap_init(void) {
+    initlock(&tickslock, "time");
     // 设置内核态的中断向量入口
     w_stvec((uint64)kernelvec);
 }
-
 
 // 内核态中断/异常入口程序
 void kerneltrap() {

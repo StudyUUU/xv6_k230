@@ -10,6 +10,9 @@ struct cpu cpus[NCPU];
 
 struct proc proc[NPROC];
 struct proc *initproc;
+static struct spinlock pid_lock;
+static int nextpid = 1;
+
 
 // 必须在中断关闭的情况下调用，
 // 防止进程在读取过程中被移到另一个 CPU
@@ -43,6 +46,8 @@ void cpuinit()
 
 // 初始化进程表
 void procinit(void) {
+  initlock(&pid_lock, "nextpid");
+
   struct proc *p;
   // 初始化每个进程的锁
   for(p = proc; p < &proc[NPROC]; p++) {
@@ -225,8 +230,6 @@ proc_mapstacks(pagetable_t kpgtbl)
     kvmmap(kpgtbl, va, (uint64)pa, PGSIZE, PTE_R | PTE_W | PTE_THEAD_MAEE | PTE_A | PTE_D);
   }
 }
-static struct spinlock pid_lock;
-static int nextpid = 1;
 
 // Free a process's page table, and free the
 // physical memory it refers to.
@@ -294,8 +297,6 @@ prepare_return(void)
 void
 forkret(void)
 {
-  printf("forkret entered\n");
-
   extern char userret[];
   static int first = 1;
   struct proc *p = myproc();

@@ -68,6 +68,10 @@ static char uart_rx_buf[UART_RX_BUF_SIZE];
 static uint64 uart_rx_w = 0;  // 写索引 (Producer)
 static uint64 uart_rx_r = 0;  // 读索引 (Consumer)
 
+static struct {
+  struct spinlock lock;
+} pr;
+
 // ====================================================================
 // 3. 初始化
 // ====================================================================
@@ -225,6 +229,9 @@ static void print_dec(int64 x)
 // 支持格式：%d %ld %x %X %p %s %c %%
 void printf(const char *fmt, ...)
 {
+    if(panicking == 0)
+        acquire(&pr.lock);
+
     va_list ap;
     va_start(ap, fmt);
     
@@ -274,6 +281,9 @@ void printf(const char *fmt, ...)
     }
     
     va_end(ap);
+
+    if(panicking == 0)
+        release(&pr.lock);
 }
 
 // ====================================================================
@@ -366,4 +376,10 @@ void uartintr(void)
             (void)msr;
         }
     }
+}
+
+void
+printfinit(void)
+{
+  initlock(&pr.lock, "pr");
 }

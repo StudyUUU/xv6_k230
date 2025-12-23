@@ -20,11 +20,11 @@ void printf(const char *fmt, ...);
 int uartgetc(void);
 void panic(const char *s);
 void uartintr(void);
-
+void printfinit(void);
 // kalloc.c - 物理内存分配
+void kinit(void);
 void* kalloc(void);
 void kfree(void *);
-void kinit(void);
 
 // string.c - 字符串操作
 void* memset(void *dst, int c, uint n);
@@ -36,7 +36,6 @@ pte_t *walk(pagetable_t pagetable, uint64 va, int alloc);
 int mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, uint64 perm);
 void kvminit(void);
 void kvminithart(void);
-void check_mapping(uint64 va, uint64 expect_pa, int expect_perm, char *name);
 void kvmmap(pagetable_t pagetable, uint64 va, uint64 pa, uint64 sz, uint64 perm);
 pagetable_t proc_pagetable(struct proc *p);
 void uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free);
