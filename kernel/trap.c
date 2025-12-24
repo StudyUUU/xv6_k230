@@ -119,8 +119,21 @@ usertrap(void)
         // 可以在这里调用 yield() 让出 CPU 给其他进程
         // yield();
     } else if(scause == 0x8000000000000009L){
-        printf("[usertrap] SEI received, reboot system\n");
-        k230_wdt_reboot();// 通过看门狗重启系统
+        int irq = plic_claim();
+        
+        if(irq == UART0_IRQ) {
+            // 如果是 UART0 (IRQ 16)
+            uartintr();
+        } 
+        else if(irq != 0) {
+            // 处理非预期的其他硬件中断
+            printf("unexpected external interrupt: irq=%d\n", irq);
+        }
+        
+        // 告诉 PLIC 该中断已处理完成
+        if(irq) {
+            plic_complete(irq);
+        }
     }else {
         printf("\n[usertrap] Unexpected scause %p\n", scause);
         printf("[usertrap] sepc=%p stval=%p\n", sepc, stval);
