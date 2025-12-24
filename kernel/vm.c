@@ -115,6 +115,13 @@ kvmmake(void)
          PTE_R | PTE_W | PTE_A | PTE_D | PTE_IO);
 
   kvmmap(kpgtbl,
+         WDT0_BASE,
+         WDT0_BASE,
+         PGSIZE,
+         PTE_R | PTE_W | PTE_A | PTE_D | PTE_IO);
+
+
+  kvmmap(kpgtbl,
          PLIC,
          PLIC_PA,
          0x4000000,

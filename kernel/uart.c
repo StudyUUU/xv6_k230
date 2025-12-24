@@ -5,7 +5,6 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
-#include "sbi.h"
 #include <stdarg.h>
 
 // ====================================================================
@@ -298,10 +297,7 @@ void panic(const char *s)
     printf("====================\n");
     
     // 自动重启系统
-    sbi_reboot();
-    
-    // 不应该执行到这里
-    while (1);
+    k230_wdt_reboot();
 }
 
 // ====================================================================
@@ -324,7 +320,7 @@ void uartintr(void)
                 
                 // 紧急按键检查
                 if (c == CTRL_X) {
-                    sbi_reboot();
+                    k230_wdt_reboot();
                 }
                 
                 // 回显
@@ -355,7 +351,7 @@ void uartintr(void)
             if (c != -1) {
                 // 紧急按键检查
                 if (c == CTRL_X) {
-                    sbi_reboot();
+                    k230_wdt_reboot();
                 }
                 
                 // 回显

@@ -9,10 +9,6 @@ struct spinlock;
 struct context;
 struct proc;
 
-// sbi.c - SBI 接口
-void sbi_shutdown(void);
-void sbi_reboot(void);
-
 // uart.c - 串口驱动
 void uartinit(void);
 void uart_puts(char *s);
@@ -83,9 +79,12 @@ void plic_complete(int);
 // swtch.S - 上下文切换
 void swtch(struct context*, struct context*);
 
-//
+// proc.c - 进程管理辅助函数
 void prepare_return(void);
 struct proc* myproc(void);
+
+// k230_wdt.c - K230 看门狗定时器
+void k230_wdt_reboot(void);
 
 // trampoline.S - 用户态/内核态切换
 extern char trampoline[];  // trampoline 页的起始地址

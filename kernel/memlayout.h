@@ -52,4 +52,28 @@
 // each surrounded by invalid guard pages.
 #define KSTACK(p) (TRAMPOLINE - ((p)+1)* 2*PGSIZE)
 
+// 8. 看门狗定时器寄存器地址
+// K230 WDT0 寄存器基地址 (参考你提供的地址映射表)
+#define WDT0_BASE         0x91106000L
+
+// 寄存器偏移量定义 (参考手册 2.7.5 Register Summary)
+#define WDT_CR_OFFSET     0x00    // Control Register
+#define WDT_TORR_OFFSET   0x04    // Timeout Range Register
+#define WDT_CCVR_OFFSET   0x08    // Current Counter Value Register
+#define WDT_CRR_OFFSET    0x0c    // Counter Restart Register
+
+// 将偏移量转换为可以直接访问的 volatile 指针
+#define WDT_CR           ((volatile uint32 *)(WDT0_BASE + WDT_CR_OFFSET))
+#define WDT_TORR         ((volatile uint32 *)(WDT0_BASE + WDT_TORR_OFFSET))
+#define WDT_CCVR         ((volatile uint32 *)(WDT0_BASE + WDT_CCVR_OFFSET))
+#define WDT_CRR          ((volatile uint32 *)(WDT0_BASE + WDT_CRR_OFFSET))
+
+// 关键位与常量定义 (参考手册 2.7.6 Register Description)
+#define WDT_CR_ENABLE    (1 << 0)   // WDT_EN: 1=开启, 0=关闭
+#define WDT_CR_RMOD_RST  (0 << 1)   // RMOD: 0=System Reset, 1=Interrupt
+#define WDT_CR_RPL_16    (0x3 << 2) // RPL: Reset Pulse Length (默认16个时钟)
+
+#define WDT_CRR_MAGIC    0x76       // 必须写入 0x76 才能重启/激活计数器
+
+
 #endif // MEMLAYOUT_H

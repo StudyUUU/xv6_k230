@@ -118,7 +118,10 @@ usertrap(void)
         set_timer(r_time() + CLOCK_INTERVAL);
         // 可以在这里调用 yield() 让出 CPU 给其他进程
         // yield();
-    } else {
+    } else if(scause == 0x8000000000000009L){
+        printf("[usertrap] SEI received, reboot system\n");
+        k230_wdt_reboot();// 通过看门狗重启系统
+    }else {
         printf("\n[usertrap] Unexpected scause %p\n", scause);
         printf("[usertrap] sepc=%p stval=%p\n", sepc, stval);
         panic("usertrap");
