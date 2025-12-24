@@ -6,16 +6,40 @@
 #include "proc.h"
 #include "defs.h"
 
+/*
+ * xv6-k230 进程管理
+ * 
+ * 核心数据结构：
+ * - cpus[NCPU]: 每个 CPU 的状态（当前进程、中断嵌套深度等）
+ * - proc[NPROC]: 进程表，每个进程都有独立的状态和上下文
+ * 
+ * 调度模型：
+ * - Round-robin 时间片轮转
+ * - scheduler() 在每个 CPU 上运行，循环查找 RUNNABLE 进程
+ * - 通过 swtch() 在调度器上下文和进程上下文间切换
+ * 
+ * 关键约定：
+ * - scheduler 持有 p->lock 调用 swtch，进程必须先 release(&p->lock)
+ * - 调用 mycpu() 前必须关闭中断，防止进程迁移
+ */
 struct cpu cpus[NCPU];
-
 struct proc proc[NPROC];
 struct proc *initproc;
+
 static struct spinlock pid_lock;
 static int nextpid = 1;
 
+static void forkret(void);
 
-// 必须在中断关闭的情况下调用，
-// 防止进程在读取过程中被移到另一个 CPU
+// ============================================================================
+// CPU 管理
+// ============================================================================
+
+/*
+ * cpuid - 获取当前 CPU ID
+ * 返回 tp 寄存器的值（在启动时设置为 hart ID）
+ * 必须在中断关闭的情况下调用，防止进程在读取过程中被移到另一个 CPU
+ */
 int
 cpuid()
 {
@@ -23,8 +47,10 @@ cpuid()
   return id;
 }
 
-// 返回当前 CPU 的 cpu 结构体指针
-// 中断必须已关闭
+/*
+ * mycpu - 返回当前 CPU 的 cpu 结构体指针
+ * 中断必须已关闭，否则进程可能迁移导致返回错误的 CPU
+ */
 struct cpu*
 mycpu(void)
 {
@@ -33,7 +59,10 @@ mycpu(void)
   return c;
 }
 
-// 初始化当前 CPU 的状态
+/*
+ * cpuinit - 初始化当前 CPU 的状态
+ * 清零中断嵌套深度和当前进程指针
+ */
 void cpuinit()
 {
     int id = cpuid();
@@ -44,19 +73,10 @@ void cpuinit()
     c->proc = 0;      // 当前无运行进程
 }
 
-// 初始化进程表
-void procinit(void) {
-  initlock(&pid_lock, "nextpid");
-
-  struct proc *p;
-  // 初始化每个进程的锁
-  for(p = proc; p < &proc[NPROC]; p++) {
-      initlock(&p->lock, "proc");
-      p->state = UNUSED;
-  }
-}
-
-// 获取当前进程
+/*
+ * myproc - 获取当前进程
+ * 安全版本：临时关闭中断以防止迁移
+ */
 struct proc* myproc(void) {
   push_off();
   struct cpu *c = mycpu();
@@ -65,10 +85,131 @@ struct proc* myproc(void) {
   return p;
 }
 
-// 调度器：每个 CPU 调用一次，永不返回
-// 循环查找可运行的进程并执行
-// 调度器在持有 p->lock 的情况下调用 swtch
-// 然后进程负责在返回前释放和重新获取该锁
+// ============================================================================
+// 进程表初始化和分配
+// ============================================================================
+
+/*
+ * procinit - 初始化进程表
+ * 为每个进程槽初始化锁，设置状态为 UNUSED
+ */
+void procinit(void) {
+  initlock(&pid_lock, "nextpid");
+
+  struct proc *p;
+  for(p = proc; p < &proc[NPROC]; p++) {
+      initlock(&p->lock, "proc");
+      p->state = UNUSED;
+  }
+}
+
+/*
+ * allocpid - 分配新的进程 ID
+ * 使用 pid_lock 保护全局计数器
+ */
+int
+allocpid()
+{
+  int pid;
+  
+  acquire(&pid_lock);
+  pid = nextpid;
+  nextpid = nextpid + 1;
+  release(&pid_lock);
+
+  return pid;
+}
+
+/*
+ * freeproc - 释放进程的所有资源
+ * 包括 trapframe、页表、进程状态等
+ */
+static void
+freeproc(struct proc *p)
+{
+  if(p->trapframe)
+    kfree((void*)p->trapframe);
+  p->trapframe = 0;
+  if(p->pagetable)
+    proc_freepagetable(p->pagetable, p->sz);
+  p->pagetable = 0;
+  p->sz = 0;
+  p->pid = 0;
+  p->parent = 0;
+  p->name[0] = 0;
+  p->chan = 0;
+  p->killed = 0;
+  p->xstate = 0;
+  p->state = UNUSED;
+}
+
+/*
+ * allocproc - 在进程表中分配一个进程槽
+ * 
+ * 步骤：
+ * 1. 查找 UNUSED 状态的进程槽
+ * 2. 分配 PID
+ * 3. 分配 trapframe 页
+ * 4. 创建用户页表（包含 trampoline 和 trapframe 映射）
+ * 5. 设置进程上下文：ra 指向 forkret，sp 指向内核栈顶
+ * 
+ * 返回时持有 p->lock，调用者负责释放
+ */
+static struct proc*
+allocproc(void)
+{
+  struct proc *p;
+
+  for(p = proc; p < &proc[NPROC]; p++) {
+    acquire(&p->lock);
+    if(p->state == UNUSED) {
+      goto found;
+    } else {
+      release(&p->lock);
+    }
+  }
+  return 0;
+
+found:
+  p->pid = allocpid();
+  p->state = USED;
+
+  // 分配 trapframe 页
+  if((p->trapframe = (struct trapframe *)kalloc()) == 0){
+    freeproc(p);
+    release(&p->lock);
+    return 0;
+  }
+
+  // 创建空的用户页表
+  p->pagetable = proc_pagetable(p);
+  if(p->pagetable == 0){
+    freeproc(p);
+    release(&p->lock);
+    return 0;
+  }
+
+  // 设置新上下文，从 forkret 开始执行
+  memset(&p->context, 0, sizeof(p->context));
+  p->context.ra = (uint64)forkret;
+  p->context.sp = p->kstack + PGSIZE;
+
+  return p;
+}
+
+/*
+ * scheduler - 每个 CPU 的调度器主循环
+ * 
+ * 永不返回，循环执行：
+ * 1. 遍历进程表查找 RUNNABLE 进程
+ * 2. 获取 p->lock
+ * 3. 设置状态为 RUNNING
+ * 4. 调用 swtch 切换到进程上下文
+ * 5. 进程返回后检查状态变化
+ * 6. 如果没有可运行进程，执行 wfi 等待中断
+ * 
+ * 关键：持有 p->lock 调用 swtch，进程必须在运行后释放该锁
+ */
 void
 scheduler(void)
 {
@@ -77,9 +218,9 @@ scheduler(void)
 
   c->proc = 0;
   for(;;){
-    // 最近运行的进程可能关闭了中断；
-    // 启用中断以避免所有进程都在等待时发生死锁。
-    // 然后再次关闭中断以避免中断和 wfi 之间可能的竞态条件。
+    // 最近运行的进程可能关闭了中断
+    // 启用中断以避免所有进程都在等待时发生死锁
+    // 然后再次关闭中断以避免中断和 wfi 之间的竞态条件
     intr_on();
     intr_off();
 
@@ -89,12 +230,14 @@ scheduler(void)
       if(p->state == RUNNABLE) {
         printf("[Scheduler] CPU %d: Switching to process %d\n", cpuid(), p->pid);
         printf("process name: %s\n",p->name);
+        
         // 切换到选定的进程
         // 进程的工作是释放其锁，然后在跳回调度器之前重新获取锁
         p->state = RUNNING;
         c->proc = p;
         swtch(&c->context, &p->context);
         printf("[Scheduler] CPU %d: Returned from process %d\n", cpuid(), p->pid);
+        
         // 进程现在运行完毕
         // 它应该在返回之前已经改变了 p->state
         c->proc = 0;
@@ -109,9 +252,17 @@ scheduler(void)
   }
 }
 
-// 切换到调度器
-// 必须持有 p->lock，并且已经改变 proc->state
-// 保存和恢复 intena，因为 intena 是此内核线程的属性，而不是此 CPU 的属性
+/*
+ * sched - 切换到调度器
+ * 
+ * 必须满足的条件：
+ * - 持有 p->lock
+ * - 已经改变 proc->state
+ * - 中断已关闭
+ * - 锁嵌套深度为 1（只持有 p->lock）
+ * 
+ * 保存和恢复 intena，因为 intena 是此内核线程的属性
+ */
 void
 sched(void)
 {
@@ -132,8 +283,10 @@ sched(void)
   mycpu()->intena = intena;
 }
 
-// 让出 CPU 给其他进程
-// 获取锁，改变状态，调用 sched() 切换到调度器
+/*
+ * yield - 让出 CPU 给其他进程
+ * 获取锁，改变状态为 RUNNABLE，调用 sched() 切换到调度器
+ */
 void yield(void) {
   struct proc *p = myproc();
   acquire(&p->lock);
@@ -142,12 +295,131 @@ void yield(void) {
   release(&p->lock);
 }
 
-// 测试函数 A - 循环打印 'A'
+// ============================================================================
+// 用户进程初始化
+// ============================================================================
+
+/*
+ * prepare_return - 准备从内核返回到用户空间
+ * 
+ * 设置 trapframe 中的内核信息（satp、sp、trap handler）
+ * 配置 stvec 指向 trampoline 中的 uservec
+ * 设置 sstatus 为用户模式并启用中断
+ */
+void
+prepare_return(void)
+{
+  struct proc *p = myproc();
+
+  // 即将切换 trap 目标从 kerneltrap() 到 usertrap()
+  // 因为从内核代码 trap 到 usertrap 会是灾难性的，所以关闭中断
+  intr_off();
+
+  // 将 syscalls、中断和异常发送到 trampoline.S 中的 uservec
+  uint64 trampoline_uservec = TRAMPOLINE + (uservec - trampoline);
+  w_stvec(trampoline_uservec);
+
+  // 设置 trapframe 值，供下次 trap 到内核时 uservec 使用
+  p->trapframe->kernel_satp = r_satp();         // 内核页表
+  p->trapframe->kernel_sp = p->kstack + PGSIZE; // 进程的内核栈
+  p->trapframe->kernel_trap = (uint64)usertrap;
+  p->trapframe->kernel_hartid = r_tp();         // cpuid() 用的 hartid
+
+  // 设置 trampoline.S 的 sret 将使用的寄存器，以进入用户空间
+  
+  // 设置 S Previous Privilege 模式为 User
+  unsigned long x = r_sstatus();
+  x &= ~SSTATUS_SPP; // 清除 SPP 为 0（用户模式）
+  x |= SSTATUS_SPIE; // 在用户模式下启用中断
+  w_sstatus(x);
+
+  // 设置 S Exception Program Counter 为保存的用户 pc
+  w_sepc(p->trapframe->epc);
+}
+
+/*
+ * forkret - fork 子进程的第一次调度入口
+ * 
+ * 由 scheduler() 首次调度时 swtch 到此
+ * 释放 scheduler 持有的 p->lock
+ * 执行首次初始化（如果需要）
+ * 准备返回用户空间
+ */
+static void
+forkret(void)
+{
+  extern char userret[];
+  static int first = 1;
+  struct proc *p = myproc();
+
+  // 仍然持有来自 scheduler 的 p->lock
+  release(&p->lock);
+
+  if (first) {
+    first = 0;
+  }
+  
+  // 返回到用户空间，模仿 usertrap() 的返回
+  prepare_return();
+  
+  uint64 satp = MAKE_SATP(p->pagetable);
+  uint64 trampoline_userret = TRAMPOLINE + (userret - trampoline);
+  ((void (*)(uint64))trampoline_userret)(satp);
+}
+
+// 初始用户程序的机器码（无限循环）
+uchar initcode[] = {
+  0x6f, 0x00, 0x00, 0x00  // j 0 (跳转到自己)
+};
+
+/*
+ * userinit - 设置第一个用户进程
+ * 
+ * 步骤：
+ * 1. 调用 allocproc 分配进程结构
+ * 2. 使用 uvminit 将 initcode 复制到用户地址 0
+ * 3. 设置 trapframe 中的 epc 和 sp
+ * 4. 标记为 RUNNABLE
+ * 
+ * 这是系统中第一个用户进程，之后所有进程都通过 fork 创建
+ */
+void
+userinit(void)
+{
+  struct proc *p;
+
+  p = allocproc();
+  initproc = p;
+  initproc->name = "initcode";
+  
+  // 分配一个用户页并将 initcode 的指令和数据复制进去
+  uvminit(p->pagetable, initcode, sizeof(initcode));
+  p->sz = PGSIZE;
+
+  // 为从内核到用户的第一次"返回"做准备
+  p->trapframe->epc = 0;      // 用户程序计数器
+  p->trapframe->sp = PGSIZE;  // 用户栈指针
+
+  p->state = RUNNABLE;
+
+  release(&p->lock);
+}
+
+// ============================================================================
+// 测试代码（仅用于内核线程协作式多任务测试）
+// ============================================================================
+
+/*
+ * test_func_a - 测试函数 A，循环打印 'A'
+ * 
+ * 关键点：
+ * - 第一行必须 release(&p->lock)，因为 scheduler 持锁调用 swtch
+ * - 通过 yield() 主动让出 CPU，实现协作式多任务
+ */
 void test_func_a(void) {
   struct proc *p = myproc();
-  // 【关键修复】释放 scheduler 移交过来的锁
+  // 【关键】释放 scheduler 移交过来的锁
   // 当 scheduler 首次 swtch 到此进程时，它持有 p->lock
-  // 需要在进入正常执行前释放该锁
   release(&p->lock);
   
   for(;;) {
@@ -158,11 +430,13 @@ void test_func_a(void) {
   }
 }
 
-// 测试函数 B - 循环打印 'B'
+/*
+ * test_func_b - 测试函数 B，循环打印 'B'
+ * 逻辑同 test_func_a
+ */
 void test_func_b(void) {
   struct proc *p = myproc();
-  // 【关键修复】释放 scheduler 移交过来的锁
-  // 理由同 test_func_a
+  // 【关键】释放 scheduler 移交过来的锁
   release(&p->lock);
   
   for(;;) {
@@ -172,30 +446,34 @@ void test_func_b(void) {
   }
 }
 
-// 手动创建测试进程
-// 为两个测试函数分别创建进程，设置其上下文使其能被调度执行
+/*
+ * test_proc_init - 手动创建测试进程
+ * 
+ * 为两个测试函数分别创建进程，手动设置上下文：
+ * - context.ra 设为函数入口（swtch 返回时跳转到此）
+ * - context.sp 设为内核栈顶
+ * - state 设为 RUNNABLE
+ * 
+ * 注意：这是简化的测试代码，生产环境应使用 allocproc
+ */
 void test_proc_init(void) {
     struct proc *p;
     char *sp;
 
     // === 创建进程 A ===
     p = &proc[0];
-    p->state = RUNNABLE;  // 设为可运行状态
+    p->state = RUNNABLE;
     p->pid = 1;
     
-    // 分配内核栈（假设 kalloc 已初始化）
+    // 分配内核栈
     p->kstack = (uint64)kalloc(); 
     if(p->kstack == 0) 
         panic("kalloc failed");
     
-    // 【关键】伪造进程上下文
-    // 当 scheduler 第一次 swtch 到此进程时：
-    // - swtch 会恢复 ra 寄存器（返回地址）
-    // - swtch 的 ret 指令会跳转到 ra（即 test_func_a）
-    // - sp 指向进程的内核栈顶
-    sp = (char *)(p->kstack + PGSIZE);   // 栈顶地址
-    p->context.ra = (uint64)test_func_a; // 返回地址 = 函数入口
-    p->context.sp = (uint64)sp;          // 栈指针
+    // 设置上下文：ra 指向函数入口，sp 指向栈顶
+    sp = (char *)(p->kstack + PGSIZE);
+    p->context.ra = (uint64)test_func_a;
+    p->context.sp = (uint64)sp;
 
     // === 创建进程 B ===
     p = &proc[1];
@@ -209,196 +487,4 @@ void test_proc_init(void) {
     sp = (char *)(p->kstack + PGSIZE);
     p->context.ra = (uint64)test_func_b;
     p->context.sp = (uint64)sp;
-}
-
-// Allocate a page for each process's kernel stack.
-// Map it high in memory, followed by an invalid
-// guard page.
-void
-proc_mapstacks(pagetable_t kpgtbl)
-{
-  struct proc *p;
-  
-  for(p = proc; p < &proc[NPROC]; p++) {
-    char *pa = kalloc();
-    if(pa == 0)
-      panic("kalloc");
-    uint64 va = KSTACK((int) (p - proc));
-
-    p->kstack = va;
-
-    kvmmap(kpgtbl, va, (uint64)pa, PGSIZE, PTE_R | PTE_W | PTE_THEAD_MAEE | PTE_A | PTE_D);
-  }
-}
-
-// Free a process's page table, and free the
-// physical memory it refers to.
-void
-proc_freepagetable(pagetable_t pagetable, uint64 sz)
-{
-  uvmunmap(pagetable, TRAMPOLINE, 1, 0);
-  uvmunmap(pagetable, TRAPFRAME, 1, 0);
-  uvmfree(pagetable, sz);
-}
-static void
-freeproc(struct proc *p)
-{
-  if(p->trapframe)
-    kfree((void*)p->trapframe);
-  p->trapframe = 0;
-  if(p->pagetable)
-    proc_freepagetable(p->pagetable, p->sz);
-  p->pagetable = 0;
-  p->sz = 0;
-  p->pid = 0;
-  p->parent = 0;
-  p->name[0] = 0;
-  p->chan = 0;
-  p->killed = 0;
-  p->xstate = 0;
-  p->state = UNUSED;
-}
-void
-prepare_return(void)
-{
-  struct proc *p = myproc();
-
-  // we're about to switch the destination of traps from
-  // kerneltrap() to usertrap(). because a trap from kernel
-  // code to usertrap would be a disaster, turn off interrupts.
-  intr_off();
-
-  // send syscalls, interrupts, and exceptions to uservec in trampoline.S
-  uint64 trampoline_uservec = TRAMPOLINE + (uservec - trampoline);
-  w_stvec(trampoline_uservec);
-
-  // set up trapframe values that uservec will need when
-  // the process next traps into the kernel.
-  p->trapframe->kernel_satp = r_satp();         // kernel page table
-  p->trapframe->kernel_sp = p->kstack + PGSIZE; // process's kernel stack
-  p->trapframe->kernel_trap = (uint64)usertrap;
-  p->trapframe->kernel_hartid = r_tp();         // hartid for cpuid()
-
-  // set up the registers that trampoline.S's sret will use
-  // to get to user space.
-  
-  // set S Previous Privilege mode to User.
-  unsigned long x = r_sstatus();
-  x &= ~SSTATUS_SPP; // clear SPP to 0 for user mode
-  x |= SSTATUS_SPIE; // enable interrupts in user mode
-  w_sstatus(x);
-
-  // set S Exception Program Counter to the saved user pc.
-  w_sepc(p->trapframe->epc);
-}
-
-// A fork child's very first scheduling by scheduler()
-// will swtch to forkret.
-void
-forkret(void)
-{
-  extern char userret[];
-  static int first = 1;
-  struct proc *p = myproc();
-
-  // Still holding p->lock from scheduler.
-  release(&p->lock);
-
-  if (first) {
-    // Some initialization functions must be run in the context
-    // of a regular process (e.g., they call sleep), and thus cannot
-    // be run from main().
-    first = 0;
-
-  }
-  // --- 实验：在 C 代码里直接写 ---
-  *(volatile char*)0x91400000 = 'X';
-  // return to user space, mimicing usertrap()'s return.
-  prepare_return();
-  *(volatile char*)0x91400000 = 'Y';
-  
-  uint64 satp = MAKE_SATP(p->pagetable);
-  uint64 trampoline_userret = TRAMPOLINE + (userret - trampoline);
-  ((void (*)(uint64))trampoline_userret)(satp);
-}
-
-int
-allocpid()
-{
-  int pid;
-  
-  acquire(&pid_lock);
-  pid = nextpid;
-  nextpid = nextpid + 1;
-  release(&pid_lock);
-
-  return pid;
-}
-static struct proc*
-allocproc(void)
-{
-  struct proc *p;
-
-  for(p = proc; p < &proc[NPROC]; p++) {
-    acquire(&p->lock);
-    if(p->state == UNUSED) {
-      goto found;
-    } else {
-      release(&p->lock);
-    }
-  }
-  return 0;
-
-found:
-  p->pid = allocpid();
-  p->state = USED;
-
-  // Allocate a trapframe page.
-  if((p->trapframe = (struct trapframe *)kalloc()) == 0){
-    freeproc(p);
-    release(&p->lock);
-    return 0;
-  }
-
-  // An empty user page table.
-  p->pagetable = proc_pagetable(p);
-  if(p->pagetable == 0){
-    freeproc(p);
-    release(&p->lock);
-    return 0;
-  }
-
-  // Set up new context to start executing at forkret,
-  // which returns to user space.
-  memset(&p->context, 0, sizeof(p->context));
-  p->context.ra = (uint64)forkret;
-  p->context.sp = p->kstack + PGSIZE;
-
-  return p;
-}
-
-uchar initcode[] = {
-  0x6f, 0x00, 0x00, 0x00
-};
-// Set up first user process.
-void
-userinit(void)
-{
-  struct proc *p;
-
-  p = allocproc();
-  initproc = p;
-  initproc->name = "initcode";
-  // allocate one user page and copy initcode's instructions
-  // and data into it.
-  uvminit(p->pagetable, initcode, sizeof(initcode));
-  p->sz = PGSIZE;
-
-  // prepare for the very first "return" from kernel to user.
-  p->trapframe->epc = 0;      // user program counter
-  p->trapframe->sp = PGSIZE;  // user stack pointer
-
-  p->state = RUNNABLE;
-
-  release(&p->lock);
 }
