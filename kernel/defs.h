@@ -45,6 +45,7 @@ void uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free);
 void kvminit(void);         // 初始化内核页表
 void kvminithart(void);     // 在当前 hart 上激活内核页表
 void kvmmap(pagetable_t pagetable, uint64 va, uint64 pa, uint64 sz, uint64 perm);
+void kvm_remove_identity(); // 移除内核页表中的恒等映射
 
 // --- 用户虚拟内存 ---
 pagetable_t proc_pagetable(struct proc *p);  // 为进程创建用户页表
@@ -123,6 +124,8 @@ void printf(const char *fmt, ...);  // 格式化输出
 void panic(const char *s);  // 内核恐慌（打印错误并停机）
 int uartgetc(void);         // 获取一个字符（非阻塞）
 void uartintr(void);        // UART 中断处理
+
+extern volatile uint64 uart_base_addr; // UART 基地址（物理或虚拟）
 
 // ============================================================================
 // K230 硬件外设

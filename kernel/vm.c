@@ -181,67 +181,75 @@ void kvmmap(pagetable_t pagetable, uint64 va, uint64 pa, uint64 sz, uint64 perm)
 pagetable_t
 kvmmake(void)
 {
-  pagetable_t kpgtbl;
+	pagetable_t kpgtbl;
 
-  kpgtbl = (pagetable_t)kalloc();
-  if(kpgtbl == 0)
-    panic("kvmmake: no memory");
-  memset(kpgtbl, 0, PGSIZE);
+	kpgtbl = (pagetable_t)kalloc();
+	if(kpgtbl == 0)
+	  panic("kvmmake: no memory");
+	memset(kpgtbl, 0, PGSIZE);
 
-  // -----------------------------
-  // 1. 设备 (MMIO) - 使用 PTE_IO 禁用缓存，强制顺序访问
-  // -----------------------------
-  kvmmap(kpgtbl,
-         UART0,
-         UART0,
-         PGSIZE,
-         PTE_R | PTE_W | PTE_A | PTE_D | PTE_IO);
+	// --------------------------------------------------
+	// 0. 临时 identity mapping（仅用于 MMU 切换瞬间）
+	// VA == PA
+	// --------------------------------------------------
+  kvmmap(kpgtbl, KERNBASE_PA, KERNBASE_PA, (uint64)etext - KERNBASE, 
+        PTE_R | PTE_X | PTE_A | PTE_THEAD_MAEE);
 
-  kvmmap(kpgtbl,
-         WDT0_BASE,
-         WDT0_BASE,
-         PGSIZE,
-         PTE_R | PTE_W | PTE_A | PTE_D | PTE_IO);
+	// -----------------------------
+	// 1. 设备 (MMIO) - 使用 PTE_IO 禁用缓存，强制顺序访问
+	// -----------------------------
+	kvmmap(kpgtbl,
+			UART0,
+			UART0_PA,
+			PGSIZE,
+			PTE_R | PTE_W | PTE_A | PTE_D | PTE_IO);
 
-  kvmmap(kpgtbl,
-         PLIC,
-         PLIC_PA,
-         0x4000000,
-         PTE_R | PTE_W | PTE_A | PTE_D | PTE_IO);
+	kvmmap(kpgtbl,
+			WDT0_BASE,
+			WDT0_BASE_PA,
+			PGSIZE,
+			PTE_R | PTE_W | PTE_A | PTE_D | PTE_IO);
 
-  // -----------------------------
-  // 2. 内核代码段 (RX) - 使用 PTE_THEAD_MAEE 启用缓存和原子操作
-  // -----------------------------
-  kvmmap(kpgtbl,
-         KERNBASE,
-         KERNBASE,
-         (uint64)etext - KERNBASE,
-         PTE_R | PTE_X | PTE_A | PTE_THEAD_MAEE);
 
-  // -----------------------------
-  // 3. 内核数据段 + 物理 RAM (RW)
-  // -----------------------------
-  kvmmap(kpgtbl,
-         (uint64)etext,
-         (uint64)etext,
-         PHYSTOP - (uint64)etext,
-         PTE_R | PTE_W | PTE_A | PTE_D | PTE_THEAD_MAEE);
+	kvmmap(kpgtbl,
+			PLIC,
+			PLIC_PA,
+			0x400000,  // 根据手册 2MB 大小，但建议多分配到 4MB 边界
+			PTE_R | PTE_W | PTE_A | PTE_D | PTE_IO); 
 
-  // -----------------------------
-  // 4. Trampoline (用户/内核共享) - 去掉 PTE_U 和 MAEE
-  // -----------------------------
-  kvmmap(kpgtbl,
-        TRAMPOLINE,
-        (uint64)trampoline,
-        PGSIZE,
-        PTE_R | PTE_X | PTE_A);
+	// -----------------------------
+	// 2. 内核代码段 (RX) - 使用 PTE_THEAD_MAEE 启用缓存和原子操作
+	// -----------------------------
+	kvmmap(kpgtbl,
+			KERNBASE,
+			KERNBASE_PA,
+			(uint64)etext - KERNBASE,
+			PTE_R | PTE_X | PTE_A | PTE_THEAD_MAEE);
 
-  // -----------------------------
-  // 5. 每个进程的内核栈
-  // -----------------------------
-  proc_mapstacks(kpgtbl);
+	// -----------------------------
+	// 3. 内核数据段 + 物理 RAM (RW)
+	// -----------------------------
+	kvmmap(kpgtbl,
+			(uint64)etext,
+			V2P((uint64)etext), // 现在已经是半高位下的虚拟地址，转换回物理地址
+			PHYSTOP - (uint64)etext,
+			PTE_R | PTE_W | PTE_A | PTE_D | PTE_THEAD_MAEE);
 
-  return kpgtbl;
+	// -----------------------------
+	// 4. Trampoline (用户/内核共享) - 去掉 PTE_U 和 MAEE
+	// -----------------------------
+	kvmmap(kpgtbl,
+		TRAMPOLINE,
+		V2P((uint64)trampoline),
+		PGSIZE,
+		PTE_R | PTE_X | PTE_A);
+
+	// -----------------------------
+	// 5. 每个进程的内核栈
+	// -----------------------------
+	proc_mapstacks(kpgtbl);
+
+	return kpgtbl;
 }
 
 /*
@@ -249,7 +257,7 @@ kvmmake(void)
  */
 void kvminit(void)
 {
-  kernel_pagetable = kvmmake();
+	kernel_pagetable = kvmmake();
 }
 
 /*
@@ -267,6 +275,25 @@ void kvminithart() {
   // 刷新 TLB (快表)
   // 必须执行！否则 CPU 可能还缓存着旧的地址转换规则
   sfence_vma();
+}
+
+void kvm_remove_identity() {
+  // Sv39 的 L2 页表(根页表)第 0 项覆盖了 [0, 1GB) 的虚拟地址范围。
+  // 我们的物理 RAM (0x0 ~ 0x40000000) 和之前的恒等映射都在这个范围内。
+  // 将其清零，相当于瞬间切断了低 1GB 的所有映射。
+  
+  // 注意：这会导致原本用于恒等映射的 1-2 页下级页表页(L1/L0)变成“孤儿”，
+  // 发生微小的物理内存泄露。但在启动阶段这是可接受的代价，
+  // 换取的是代码的极度简洁。
+  kernel_pagetable[0] = 0;
+
+  // 必须立即刷新 TLB！
+  // 否则 CPU 的快表(TLB)里可能还缓存着刚才的低位映射，
+  // 导致后续代码依然能非法访问低地址，起不到保护作用。
+  sfence_vma(); 
+  
+  // (可选) 打印一条日志，方便调试
+  // printf("kvm_remove_identity: Low 1GB mapping removed.\n");
 }
 
 // ============================================================================

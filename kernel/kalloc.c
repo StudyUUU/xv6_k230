@@ -20,11 +20,9 @@ struct {
 void kinit() {
   initlock(&kmem.lock, "kmem");
 
-  // 从内核结束的地方开始，一直到物理内存结束
-  // 把每一页都释放掉(kfree)，这样它们就进入了 freelist
-  char *p = (char*)PGROUNDUP((uint64)end);
+  char *p = (char*)PGROUNDUP((uint64)end); // 从内核代码/数据结束的位置开始，end 刚好为内核结束地址，也就是堆顶
   for(; p + PGSIZE <= (char*)PHYSTOP; p += PGSIZE)
-    kfree(p);
+    kfree(p); // 把剩下的所有页，一页一页地“释放”进空闲链表
 }
 
 // 释放一页物理内存
@@ -39,7 +37,7 @@ void kfree(void *pa) {
 
   acquire(&kmem.lock);
 
-  r = (struct run*)pa;
+  r = (struct run*)pa; // 头插法加入空闲链表
   r->next = kmem.freelist;
   kmem.freelist = r;
 
@@ -56,7 +54,11 @@ void *kalloc(void) {
     kmem.freelist = r->next;
   release(&kmem.lock);
 
+  // 因为 r->next 占用了前 8 字节，分配出去前必须清零，
+  // 否则调用者会读到这个残留的指针数据，造成安全隐患。
+  // 这里清零整个页，简单粗暴。
   if(r)
-    memset((char*)r, 0, PGSIZE); 
+    memset((char*)r, 0, PGSIZE);  
+
   return (void*)r;
 }

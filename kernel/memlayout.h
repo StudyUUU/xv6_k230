@@ -2,81 +2,74 @@
 #define MEMLAYOUT_H
 
 /*
- * xv6-k230 内存布局定义
- * 
- * 包含：
- * 1. 物理内存布局（KERNBASE、PHYSTOP）
- * 2. 外设 MMIO 地址（UART0、PLIC、WDT）
- * 3. 虚拟地址空间布局（TRAMPOLINE、TRAPFRAME、KSTACK）
- * 4. 设备寄存器偏移和常量
+ * xv6-k230 内存布局 (Linux 风格线性映射版)
+ * * 策略：
+ * 1. 用户空间：占据低 256GB (0x0000000000 -> 0x003FFFFFFFFF)
+ * 2. 内核空间：占据高 256GB (0xFFFFFFC000... -> Top)
+ * 3. 映射方式：所有物理地址(RAM & IO) 均通过线性偏移映射到内核空间
  */
 
 // ============================================================================
-// 物理内存布局
+// 1. 核心转换宏 (The Magic Offset)
 // ============================================================================
 
-// 内核加载的物理基地址（由 U-Boot 加载到此地址）
-#define KERNBASE 0x00200000L
+// Sv39 高半区起始地址 (也就是内核空间的起点)
+// Offset = 0xFFFFFFC000000000
+#define KERN_VIRT_BASE   0xFFFFFFC000000000L
 
-// 物理内存结束地址（内核管理 128MB RAM）
-#define PHYSTOP (KERNBASE + 128*1024*1024) 
+// 物理转虚拟 (PA -> VA)
+#define P2V(pa)          ((uint64)(pa) + KERN_VIRT_BASE)
+
+// 虚拟转物理 (VA -> PA)
+#define V2P(va)          ((uint64)(va) - KERN_VIRT_BASE)
+
+// ============================================================================
+// 2. 物理内存定义
+// ============================================================================
+
+// 物理基地址
+#define KERNBASE_PA      0x00200000L // DDR从0x00000000L开始，但预留2MB给 底层的 OpenSBI
+
+// 物理大小 (1GB)
+#define PHYSTOP_PA       (KERNBASE_PA + 1022*1024*1024) // 1GB 内存上限，但是前面预留了 2MB 给OpenSBI，所以是 1022MB 给 xv6 使用
+
+// 内核代码的虚拟地址 (给代码中的链接符号用)
+#define KERNBASE         P2V(KERNBASE_PA)
+#define PHYSTOP          P2V(PHYSTOP_PA)
 
 // 页面大小
-#define PGSIZE 4096
+#define PGSIZE           4096
 
 // ============================================================================
-// UART0 - DW8250 串口
+// 3. 外设 MMIO (通过 P2V 映射到高位)
 // ============================================================================
+// 这种方式下，内核通过高位虚拟地址访问设备，彻底避开用户低位空间
 
-// UART0 基地址（物理地址，identity 映射）
-#define UART0 0x91400000L
+// --- UART0 ---
+#define UART0_PA         0x91400000L
+#define UART0            P2V(UART0_PA)  // VA = 0xFFFFFFC091400000
+#define UART0_IRQ        16
 
-// UART0 中断号
-// K230 手册中 UART0 的 Interrupt Bit 是 0
-// RISC-V PLIC 中，Source ID 0 保留，因此实际 IRQ = Bit + 1
-#define UART0_IRQ 16
+// --- PLIC ---
+// K230 PLIC 物理地址: 0x0F00000000 (约 60GB)
+// Sv39 内核窗口大小: 256GB
+// 60GB < 256GB，所以直接线性映射是安全的，不会溢出！
+#define PLIC_PA          0x0f00000000L
+#define PLIC             P2V(PLIC_PA)   // VA = 0xFFFFFFCF00000000 只在内核空间（高半区）的四分之一处
 
-// ============================================================================
-// PLIC - 平台级中断控制器
-// ============================================================================
+// PLIC 寄存器 (基于高位虚拟地址计算)
+#define PLIC_CTRL        (PLIC + 0x01FFFFCL)
+#define PLIC_PRIORITY    (PLIC + 0x0)
+#define PLIC_PENDING     (PLIC + 0x1000)
+#define PLIC_SENABLE(h)  (PLIC + 0x2080 + (h)*0x100)
+#define PLIC_SPRIORITY(h)(PLIC + 0x201000 + (h)*0x2000)
+#define PLIC_SCLAIM(h)   (PLIC + 0x201004 + (h)*0x2000)
 
-// --- PLIC 地址映射 ---
-// K230 PLIC 物理地址在 0x0f00000000（36 位地址）
-// Sv39 虚拟地址空间只有 39 位，无法直接映射
-// 因此映射到虚拟地址 0x10000000（256MB 处）
-#define PLIC_PA             0x0f00000000L  // 物理基地址
-#define PLIC                0x10000000L    // 虚拟基地址（内核访问）
+// --- WDT0 ---
+#define WDT0_BASE_PA          0x91106000L
+#define WDT0_BASE        P2V(WDT0_BASE_PA)
 
-// --- K230 特有 PLIC 控制寄存器 ---
-// K230 PLIC 在 M-mode 下默认锁定，必须在 M-mode 解锁后 S-mode 才能访问
-// 控制寄存器物理偏移 0x01FFFFC
-#define PLIC_CTRL           (PLIC + 0x01FFFFCL)
-
-// --- PLIC 标准寄存器 ---
-// 优先级寄存器：Source N 对应偏移 0x4 * N
-#define PLIC_PRIORITY       (PLIC + 0x0) 
-
-// 挂起寄存器：Source 1-31 对应 bit 1-31
-#define PLIC_PENDING        (PLIC + 0x1000)
-
-// S-Mode Enable 寄存器（Context 1）
-// C908 手册：M-mode Enable @ 0x2000，步进 0x80
-// S-mode Context 1 @ 0x2080
-#define PLIC_SENABLE(hart)  (PLIC + 0x2080 + (hart)*0x100)
-
-// S-Mode Threshold & Claim 寄存器（Context 1）
-// C908 手册明确指出的偏移
-#define PLIC_SPRIORITY(hart) (PLIC + 0x201000 + (hart)*0x2000)
-#define PLIC_SCLAIM(hart)    (PLIC + 0x201004 + (hart)*0x2000)
-
-// ============================================================================
-// WDT0 - 看门狗定时器
-// ============================================================================
-
-// --- WDT0 基地址 ---
-#define WDT0_BASE         0x91106000L
-
-// --- WDT0 寄存器偏移（参考手册 2.7.5 Register Summary）---
+// --- WDT0 寄存器偏移
 #define WDT_CR_OFFSET     0x00    // Control Register
 #define WDT_TORR_OFFSET   0x04    // Timeout Range Register
 #define WDT_CCVR_OFFSET   0x08    // Current Counter Value Register
@@ -97,20 +90,10 @@
 #define WDT_CRR_MAGIC    0x76       // 必须写入 0x76 才能重启/激活计数器
 
 // ============================================================================
-// 虚拟地址空间布局
+// 4. 特殊页面 (保持在虚拟空间的最顶端)
 // ============================================================================
-
-// --- 内核虚拟基地址（预留，暂未使用）---
-#define KERN_VIRT_BASE 0x80000000L
-
-// --- 用户地址空间高端映射 ---
-// MAXVA 定义在 riscv.h 中（Sv39 最大虚拟地址）
-
-// Trampoline 页（用户/内核共享代码，用于陷阱入口）
-#define TRAMPOLINE (MAXVA - PGSIZE)
-
-// Trapframe 页（每个进程的陷阱帧，存储用户寄存器）
-#define TRAPFRAME (TRAMPOLINE - PGSIZE)
+#define TRAMPOLINE       (MAXVA - PGSIZE)
+#define TRAPFRAME        (TRAMPOLINE - PGSIZE)
 
 // --- 内核栈布局 ---
 // 每个进程的内核栈映射在 trampoline 下方

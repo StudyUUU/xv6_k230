@@ -13,11 +13,11 @@
 __attribute__ ((aligned (16))) char stack0[4096 * NCPU]; // CPU0 内核栈， 每个 CPU 4KB
 
 // 外部函数声明
-void uart_puts(char *s);
 void main();
 
 void start()
 {
+    uart_base_addr = UART0_PA; // 在 M-mode 下使用物理地址访问 UART
     uart_puts("we are in M-mode start()\n");
 
     // 1. 设置 M-mode 状态 -> 切到 S-mode
@@ -57,7 +57,10 @@ void start()
     // }
 
     // 5. 跳转准备
-    w_mepc((uint64)main); // 设置返回地址到 main 函数
+    // 修正：跳转到 main 的物理地址
+    // 即使 main 符号在高位，我们手动减去偏移量，确保 mret 后仍在物理地址模式运行
+    uint64 main_pa = (uint64)main - KERN_VIRT_BASE;
+    w_mepc(main_pa); // 设置返回地址到 main 函数
     w_satp(0); // 清空当前页表，使用空页表切换到 S-mode
 
     // 6. PMP 配置

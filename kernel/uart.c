@@ -14,11 +14,13 @@
 // ====================================================================
 // 1. 硬件寄存器定义
 // ====================================================================
+volatile uint64 uart_base_addr = UART0_PA; // 增加一个全局变量，默认为物理地址
 
 // K230 UART0 寄存器访问宏 (32位对齐，4字节步进)
-#define Reg(reg) ((volatile uint32 *)(UART0 + (reg) * 4))
+#define Reg(reg) ((volatile uint32 *)(uart_base_addr + (reg) * 4)) // 驱动只能认虚拟地址，不能为了start.c里面没有开启虚拟内存而写物理地址
 #define ReadReg(reg) (*(Reg(reg)))
-#define WriteReg(reg, v) (*(Reg(reg)) = (v))
+#define WriteReg(reg, v) (*(Reg(reg)) = (v)) 
+
 
 // DW8250 标准寄存器偏移
 #define RHR 0                 // Receive Holding Register (Read)
@@ -295,9 +297,10 @@ void panic(const char *s)
     printf("\n=== KERNEL PANIC ===\n");
     printf("panic: %s\n", s);
     printf("====================\n");
-    
-    // 自动重启系统
-    k230_wdt_reboot();
+
+    while (1) {
+        asm volatile("wfi");
+    }
 }
 
 // ====================================================================

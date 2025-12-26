@@ -3,13 +3,20 @@ ENTRY( _entry )
 
 SECTIONS
 {
-  /* K230 加载地址 */
-  . = 0x00200000;
+  /* * [核心改动] 设置起始虚拟地址 (VMA)
+   * 必须匹配 memlayout.h 中的 KERNBASE (0xFFFFFFC000200000)
+   */
+  . = 0xFFFFFFC000200000;
+
+  /* * [核心策略] 
+   * 使用 AT(...) 指令指定加载物理地址 (LMA)。
+   * 这样 U-Boot 将 Image 放在 0x200000，但代码内部生成的跳转指令是针对 0xFFFFFFC... 的。
+   */
 
   /* * 优化 1: 代码段 (.text) 单独页对齐
    * 目的: 这一段在 MMU 中将被映射为 "只读 + 可执行 (R|X)"
    */
-  .text : {
+  .text : AT(0x00200000){
     *(.text .text.*)
     . = ALIGN(0x1000);
     _trampoline = .;
