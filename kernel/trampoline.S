@@ -1,13 +1,14 @@
         #
-        # low-level code to handle traps from user space into
-        # the kernel, and returns from kernel to user.
+        # 处理从用户态进入内核的 trap 的底层代码，
+        # 以及从内核返回到用户态的代码。
         #
-        # the kernel maps the page holding this code
-        # at the same virtual address (TRAMPOLINE)
-        # in user and kernel space so that it continues
-        # to work when it switches page tables.
-        # kernel.ld causes this code to start at 
-        # a page boundary.
+        # 内核在用户空间和内核空间中，
+        # 都将保存本代码的那一页
+        # 映射到相同的虚拟地址（TRAMPOLINE），
+        # 这样在切换页表时这段代码仍然可以继续执行。
+        #
+        # kernel.ld 保证这段代码
+        # 从一个页边界开始放置。
         #
 
 #include "riscv.h"
@@ -20,23 +21,23 @@ trampoline:
 .align 4
 .globl uservec
 uservec:    
-	#
-        # trap.c sets stvec to point here, so
-        # traps from user space start here,
-        # in supervisor mode, but with a
-        # user page table.
+        #
+        # trap.c 会把 stvec 设置为这里，
+        # 因此来自用户态的 trap 会从这里开始执行，
+        # 此时已经处于 S 模式，
+        # 但仍然使用的是用户页表。
         #
 
-        # save user a0 in sscratch so
-        # a0 can be used to get at TRAPFRAME.
+        # 将用户态的 a0 保存到 sscratch 中，
+        # 这样 a0 就可以被用来访问 TRAPFRAME。
         csrw sscratch, a0
 
-        # each process has a separate p->trapframe memory area,
-        # but it's mapped to the same virtual address
-        # (TRAPFRAME) in every process's user page table.
+        # 每个进程都有自己独立的 p->trapframe 内存区域，
+        # 但它在每个进程的用户页表中
+        # 都映射到相同的虚拟地址（TRAPFRAME）。
         li a0, TRAPFRAME
         
-        # save the user registers in TRAPFRAME
+        # 将用户态的寄存器保存到 TRAPFRAME 中
         sd ra, 40(a0)
         sd sp, 48(a0)
         sd gp, 56(a0)
@@ -68,48 +69,53 @@ uservec:
         sd t5, 272(a0)
         sd t6, 280(a0)
 
-	# save the user a0 in p->trapframe->a0
+        # 将用户态的 a0 保存到 p->trapframe->a0
         csrr t0, sscratch
         sd t0, 112(a0)
 
-        # initialize kernel stack pointer, from p->trapframe->kernel_sp
+        # 从 p->trapframe->kernel_sp 中
+        # 初始化内核栈指针
         ld sp, 8(a0)
 
-        # make tp hold the current hartid, from p->trapframe->kernel_hartid
+        # 从 p->trapframe->kernel_hartid 中
+        # 让 tp 保存当前 hartid
         ld tp, 32(a0)
 
-        # load the address of usertrap(), from p->trapframe->kernel_trap
+        # 从 p->trapframe->kernel_trap 中
+        # 取出 usertrap() 的地址
         ld t0, 16(a0)
 
-        # fetch the kernel page table address, from p->trapframe->kernel_satp.
+        # 从 p->trapframe->kernel_satp 中
+        # 取出内核页表地址
         ld t1, 0(a0)
 
-        # wait for any previous memory operations to complete, so that
-        # they use the user page table.
+        # 等待之前的所有内存操作完成，
+        # 确保它们使用的是用户页表
         sfence.vma zero, zero
 
-        # install the kernel page table.
+        # 安装内核页表
         csrw satp, t1
 
-        # flush now-stale user entries from the TLB.
+        # 刷新 TLB 中已经失效的用户态映射
         sfence.vma zero, zero
 
-        # call usertrap()
+        # 调用 usertrap()
         jalr t0
 
 .globl userret
 userret:
-        # usertrap() returns here, with user satp in a0.
-        # return from kernel to user.
+        # usertrap() 返回到这里，
+        # 此时 a0 中保存的是用户态的 satp。
+        # 从内核返回到用户态。
 
-        # switch to the user page table.
+        # 切换回用户页表
         sfence.vma zero, zero
         csrw satp, a0
         sfence.vma zero, zero
 
         li a0, TRAPFRAME
 
-        # restore all but a0 from TRAPFRAME
+        # 从 TRAPFRAME 中恢复除 a0 以外的所有寄存器
         ld ra, 40(a0)
         ld sp, 48(a0)
         ld gp, 56(a0)
@@ -141,9 +147,9 @@ userret:
         ld t5, 272(a0)
         ld t6, 280(a0)
 
-	# restore user a0
+        # 恢复用户态的 a0
         ld a0, 112(a0)
         
-        # return to user mode and user pc.
-        # usertrapret() set up sstatus and sepc.
+        # 返回到用户态并跳转到用户 PC
+        # usertrapret() 已经设置好了 sstatus 和 sepc
         sret

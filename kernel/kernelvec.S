@@ -1,17 +1,18 @@
-	#
-        # interrupts and exceptions while in supervisor
-        # mode come here.
         #
-        # push all registers, call kerneltrap(), restore, return.
+        # 在 S 模式（Supervisor）下发生的
+        # 中断和异常都会进入这里
+        #
+        # 保存所有寄存器，调用 kerneltrap()，
+        # 恢复寄存器后返回
         #
 .globl kerneltrap
 .globl kernelvec
 .align 4
 kernelvec:
-        // make room to save registers.
+        // 为保存寄存器在栈上预留空间
         addi sp, sp, -256
 
-        // save the registers.
+        // 保存所有通用寄存器
         sd ra, 0(sp)
         sd sp, 8(sp)
         sd gp, 16(sp)
@@ -44,14 +45,15 @@ kernelvec:
         sd t5, 232(sp)
         sd t6, 240(sp)
 
-	// call the C trap handler in trap.c
+        // 调用 trap.c 中用 C 实现的内核异常处理函数
         call kerneltrap
 
-        // restore registers.
+        // 恢复所有寄存器
         ld ra, 0(sp)
         ld sp, 8(sp)
         ld gp, 16(sp)
-        // not this, in case we moved CPUs: ld tp, 24(sp)
+        // 不恢复 tp，防止在处理中发生 CPU 切换
+        // ld tp, 24(sp)
         ld t0, 32(sp)
         ld t1, 40(sp)
         ld t2, 48(sp)
@@ -80,9 +82,9 @@ kernelvec:
         ld t5, 232(sp)
         ld t6, 240(sp)
 
+        // 回收为寄存器保存而分配的栈空间
         addi sp, sp, 256
 
-        // return to whatever we were doing in the kernel.
+        // 使用 sret 返回到进入内核前正在执行的地方
         sret
-
         

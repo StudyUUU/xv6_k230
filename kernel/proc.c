@@ -316,6 +316,7 @@ prepare_return(void)
   intr_off();
 
   // 将 syscalls、中断和异常发送到 trampoline.S 中的 uservec
+  // 通过trampoline 在内核和用户空间虚拟地址都一致的情况，去设置 stvec
   uint64 trampoline_uservec = TRAMPOLINE + (uservec - trampoline);
   w_stvec(trampoline_uservec);
 
@@ -362,6 +363,8 @@ forkret(void)
   // 返回到用户空间，模仿 usertrap() 的返回
   prepare_return();
   
+  // 跳转到 trampoline.S 中的 userret 以返回用户态
+  // 切换页表，并且切换到用户态
   uint64 satp = MAKE_SATP(p->pagetable);
   uint64 trampoline_userret = TRAMPOLINE + (userret - trampoline);
   ((void (*)(uint64))trampoline_userret)(satp);

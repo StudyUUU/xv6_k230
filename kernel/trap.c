@@ -12,15 +12,21 @@ extern void kernelvec();
 
 void trap_init(void) {
     initlock(&tickslock, "time");
-    // 设置内核态的中断向量入口
+    // 将中断向量设置为内核态的 kernelvec
     w_stvec((uint64)kernelvec);
 }
 
 // 内核态中断/异常入口程序
 void kerneltrap() {
-    uint64 sepc = r_sepc();
-    uint64 sstatus = r_sstatus();
-    uint64 scause = r_scause();
+    uint64 sepc = r_sepc(); // 陷阱发生时的程序计数器的保存
+    uint64 sstatus = r_sstatus(); // 当前状态的（如中断使能标志）的保存
+    uint64 scause = r_scause(); // 陷阱原因
+    uint64 stval = r_stval(); // 发生异常的地址或值
+
+    if((sstatus & SSTATUS_SPP) == 0)
+        panic("kerneltrap: not from supervisor mode");
+    if(intr_get() != 0)
+        panic("kerneltrap: interrupts enabled");
 
     // 检查是否为中断 (scause 最高位为 1)
     if(scause & 0x8000000000000000L) {
@@ -70,9 +76,10 @@ void kerneltrap() {
         printf("\n<<<< KERNEL PANIC: EXCEPTION >>>>\n");
         printf("scause: %p\n", scause);
         printf("sepc:   %p (Instruction address)\n", sepc);
-        printf("stval:  %p (Faulting address/value)\n", r_stval());
+        printf("stval:  %p (Faulting address/value)\n", stval);
         
-        // 发生内核异常时，系统无法继续运行，进入死循环
+        // 发生内核异常时，系统无法继续运行，通过看门狗重启系统
+        k230_wdt_reboot();
         while(1);
     }
 
@@ -89,7 +96,7 @@ usertrap(void)
     if((r_sstatus() & SSTATUS_SPP) != 0)
         panic("usertrap: not from user");
 
-    // 在处理用户陷阱时，将中断向量切换回内核模式的 kernelvec
+    // 将中断向量设置为内核态的 kernelvec，防止在处理该中断的过程中再次发生中断导致错误跳转
     w_stvec((uint64)kernelvec);
 
     uint64 scause = r_scause();
