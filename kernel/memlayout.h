@@ -3,127 +3,113 @@
 
 /*
  * xv6-k230 内存布局定义
- * 
- * 包含：
- * 1. 物理内存布局（KERNBASE、PHYSTOP）
- * 2. 外设 MMIO 地址（UART0、PLIC、WDT）
- * 3. 虚拟地址空间布局（TRAMPOLINE、TRAPFRAME、KSTACK）
- * 4. 设备寄存器偏移和常量
+ * * 对应架构图：[image_b2c52e.png]
+ * * 核心设计哲学：
+ * 1. 低端内存 (Identity Mapping): VA = PA。用于内核自身的代码、数据运行，以及驱动访问硬件。
+ * 2. 高端内存 (High Mapping):    VA != PA。用于进程隔离机制（Trampoline, Trapframe, Kernel Stacks）。
  */
 
 // ============================================================================
-// 物理内存布局
+// 1. 物理内存布局 (对应图中右侧 Physical Address 区域)
 // ============================================================================
 
-// 内核加载的物理基地址（由 U-Boot 加载到此地址）
+// [图中右下角] 内核加载基地址
+// U-Boot 将 kernel.bin 加载到物理内存的 0x00200000 处
+// 内核的第一条指令 _entry 就在这里
 #define KERNBASE 0x00200000L
 
-// 物理内存结束地址（内核管理 128MB RAM）
-#define PHYSTOP (KERNBASE + 128*1024*1024) 
+// [图中左侧中部文字] 物理内存结束地址
+// 除去为opensbi预留2MB，K230拥有约 1022MB 可用内存，从 KERNBASE 延伸到 PHYSTOP
+#define PHYSTOP (KERNBASE + 1022*1024*1024) 
 
-// 页面大小
+// 页面大小 (4KB)
 #define PGSIZE 4096
 
 // ============================================================================
-// UART0 - DW8250 串口
+// 2. 外设 MMIO (Identity Mapping 区)
+//    这些地址既是物理地址，也是内核页表中映射的虚拟地址
 // ============================================================================
 
-// UART0 基地址（物理地址，identity 映射）
+// [图中中部] UART0 - DW8250 串口
+// 物理地址：0x91400000
+// 映射属性：PTE_R | PTE_W | PTE_IO (强顺序，无缓存)
 #define UART0 0x91400000L
 
-// UART0 中断号
-// K230 手册中 UART0 的 Interrupt Bit 是 0
-// RISC-V PLIC 中，Source ID 0 保留，因此实际 IRQ = Bit + 1
+// UART0 中断号 (PLIC Source ID)
 #define UART0_IRQ 16
 
-// ============================================================================
-// PLIC - 平台级中断控制器
-// ============================================================================
+// [图中中部] PLIC - 平台级中断控制器
+// 物理地址：0x0f00000000 (36位地址)
+// 注意：Sv39 虚拟地址空间有 39 位 (512GB)，足以覆盖 36 位物理地址。
+//      因此我们可以直接做 Identity Mapping。
+#define PLIC        0x0f00000000L
 
-// --- PLIC 地址映射 ---
-// K230 PLIC 物理地址在 0x0f00000000（36 位地址）
-// Sv39 虚拟地址空间只有 39 位，无法直接映射
-// 因此映射到虚拟地址 0x10000000（256MB 处）
-#define PLIC_PA             0x0f00000000L  // 物理基地址
-#define PLIC                0x10000000L    // 虚拟基地址（内核访问）
-
-// --- K230 特有 PLIC 控制寄存器 ---
-// K230 PLIC 在 M-mode 下默认锁定，必须在 M-mode 解锁后 S-mode 才能访问
-// 控制寄存器物理偏移 0x01FFFFC
+// --- PLIC 寄存器偏移定义 ---
+// K230 特有：在 M-mode 下必须解锁此寄存器，S-mode 才能访问 PLIC
 #define PLIC_CTRL           (PLIC + 0x01FFFFCL)
 
-// --- PLIC 标准寄存器 ---
-// 优先级寄存器：Source N 对应偏移 0x4 * N
+// 标准 PLIC 寄存器
 #define PLIC_PRIORITY       (PLIC + 0x0) 
-
-// 挂起寄存器：Source 1-31 对应 bit 1-31
 #define PLIC_PENDING        (PLIC + 0x1000)
 
-// S-Mode Enable 寄存器（Context 1）
-// C908 手册：M-mode Enable @ 0x2000，步进 0x80
-// S-mode Context 1 @ 0x2080
+// 上下文 Context 1 (对应 S-mode Hart 0)
+// 偏移量基于 K230/C908 手册
 #define PLIC_SENABLE(hart)  (PLIC + 0x2080 + (hart)*0x100)
-
-// S-Mode Threshold & Claim 寄存器（Context 1）
-// C908 手册明确指出的偏移
 #define PLIC_SPRIORITY(hart) (PLIC + 0x201000 + (hart)*0x2000)
 #define PLIC_SCLAIM(hart)    (PLIC + 0x201004 + (hart)*0x2000)
 
-// ============================================================================
-// WDT0 - 看门狗定时器
-// ============================================================================
+// [图中中部] WDT0 - 看门狗
+// 物理地址：0x91106000
+#define WDT0_BASE 0x91106000L
 
-// --- WDT0 基地址 ---
-#define WDT0_BASE         0x91106000L
+// WDT 寄存器偏移
+#define WDT_CR_OFFSET     0x00    
+#define WDT_TORR_OFFSET   0x04    
+#define WDT_CCVR_OFFSET   0x08    
+#define WDT_CRR_OFFSET    0x0c    
 
-// --- WDT0 寄存器偏移（参考手册 2.7.5 Register Summary）---
-#define WDT_CR_OFFSET     0x00    // Control Register
-#define WDT_TORR_OFFSET   0x04    // Timeout Range Register
-#define WDT_CCVR_OFFSET   0x08    // Current Counter Value Register
-#define WDT_CRR_OFFSET    0x0c    // Counter Restart Register
-
-// --- WDT0 寄存器访问宏 ---
+// 访问宏
 #define WDT_CR           ((volatile uint32 *)(WDT0_BASE + WDT_CR_OFFSET))
 #define WDT_TORR         ((volatile uint32 *)(WDT0_BASE + WDT_TORR_OFFSET))
 #define WDT_CCVR         ((volatile uint32 *)(WDT0_BASE + WDT_CCVR_OFFSET))
 #define WDT_CRR          ((volatile uint32 *)(WDT0_BASE + WDT_CRR_OFFSET))
 
-// --- WDT0 控制寄存器位定义（参考手册 2.7.6 Register Description）---
-#define WDT_CR_ENABLE    (1 << 0)   // WDT_EN: 1=启用, 0=禁用
-#define WDT_CR_RMOD_RST  (0 << 1)   // RMOD: 0=系统复位, 1=中断
-#define WDT_CR_RPL_16    (0x3 << 2) // RPL: 复位脉冲长度（默认 16 时钟周期）
-
-// --- WDT0 魔术值 ---
-#define WDT_CRR_MAGIC    0x76       // 必须写入 0x76 才能重启/激活计数器
+// WDT 配置常量
+#define WDT_CR_ENABLE    (1 << 0)   
+#define WDT_CR_RMOD_RST  (0 << 1)   
+#define WDT_CR_RPL_16    (0x3 << 2) 
+#define WDT_CRR_MAGIC    0x76       
 
 // ============================================================================
-// 虚拟地址空间布局
+// 3. 虚拟地址空间高端映射 (对应图中左上角 Virtual Address 区域)
+//    这些地址仅存在于虚拟空间，物理上映射到 kernel_heap 或 text 段
 // ============================================================================
 
-// --- 内核虚拟基地址（预留，暂未使用）---
-#define KERN_VIRT_BASE 0x80000000L
+// MAXVA 定义在 riscv.h (Sv39 = 1L << 38)
 
-// --- 用户地址空间高端映射 ---
-// MAXVA 定义在 riscv.h 中（Sv39 最大虚拟地址）
-
-// Trampoline 页（用户/内核共享代码，用于陷阱入口）
+// [图中左上角] Trampoline 页
+// 虚拟地址：最高页 (MAXVA - PGSIZE)
+// 物理来源：对应图中右下箭头 -> 指向 .text 段中的 trampoline 代码
+// 作用：用户态/内核态切换的“跳板”，必须在固定位置
 #define TRAMPOLINE (MAXVA - PGSIZE)
 
-// Trapframe 页（每个进程的陷阱帧，存储用户寄存器）
+// [图中左上角] Trapframe 页
+// 虚拟地址：TRAMPOLINE 下方
+// 物理来源：对应图中右上箭头 -> 指向 kernel_heap 中动态分配的页
+// 作用：保存进程进入内核时的用户寄存器
 #define TRAPFRAME (TRAMPOLINE - PGSIZE)
 
-// --- 内核栈布局 ---
-// 每个进程的内核栈映射在 trampoline 下方
-// 每个栈大小 PGSIZE，下方有 guard page（未映射）用于检测栈溢出
+// [图中左上角] 内核栈 (Kernel Stack)
+// 虚拟地址：TRAMPOLINE 向下生长
+// 物理来源：对应图中右侧箭头 -> 指向 kernel_heap 中动态分配的页
 // 
-// 布局示例（从高到低）：
-// TRAMPOLINE (MAXVA - PGSIZE)
-// TRAPFRAME  (MAXVA - 2*PGSIZE)
-// [guard]    (MAXVA - 3*PGSIZE) - 未映射
-// kstack[0]  (MAXVA - 4*PGSIZE)
-// [guard]    (MAXVA - 5*PGSIZE) - 未映射
-// kstack[1]  (MAXVA - 6*PGSIZE)
-// ...
+// 关键结构：Guard Page (图中的 Guard)
+// 每个栈之间有一个未映射的页 (PTE_V = 0)。
+// 如果内核栈溢出，会访问到 Guard Page 触发 Page Fault，从而通过 Panic 保护系统。
+// 
+// 计算公式：
+// p=0: Top = MAXVA - 2*PGSIZE, Stack = [Top-PGSIZE, Top]
+// p=1: ... 向下偏移 2*PGSIZE (一个栈页 + 一个 Guard 页)
 #define KSTACK(p) (TRAMPOLINE - ((p)+1)* 2*PGSIZE)
 
 #endif // MEMLAYOUT_H

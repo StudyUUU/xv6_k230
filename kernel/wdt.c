@@ -15,7 +15,7 @@ void k230_wdt_reboot(void)
     // 手册强调：这是安全机制，必须写 0x76
     *WDT_CRR = WDT_CRR_MAGIC;
 
-    printf("[WDT] Reboot command sent. Waiting for hardware...\n");
+    printf("\n[WDT] Reboot command sent. Waiting for hardware...\n");
 
     // 4. 调试验证：读取当前计数值 (CCVR)
     // 如果 CCVR 在变小，说明 WDT 正在倒计时，复位即将发生

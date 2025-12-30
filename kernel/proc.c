@@ -174,14 +174,14 @@ found:
   p->pid = allocpid();
   p->state = USED;
 
-  // 分配 trapframe 页
+  // 分配 trapframe 页，物理上的一页
   if((p->trapframe = (struct trapframe *)kalloc()) == 0){
     freeproc(p);
     release(&p->lock);
     return 0;
   }
 
-  // 创建空的用户页表
+  // 创建用户页表，包含trampoline和trapframe映射
   p->pagetable = proc_pagetable(p);
   if(p->pagetable == 0){
     freeproc(p);
@@ -392,7 +392,7 @@ userinit(void)
   initproc = p;
   initproc->name = "initcode";
   
-  // 分配一个用户页并将 initcode 的指令和数据复制进去
+  // 分配用户代码页，并进行映射
   uvminit(p->pagetable, initcode, sizeof(initcode));
   p->sz = PGSIZE;
 

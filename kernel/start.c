@@ -46,7 +46,7 @@ void start()
     
     // 4. 解锁并验证 PLIC_CTRL (必须在 M-Mode 且无 Cache 干扰时进行)
     // 由于默认 PLIC_CTRL 寄存器在 S-mode 下是锁定的，必须写入 1 解锁 S-mode 访问
-    volatile uint32 *plic_ctrl_pa = (uint32*)(PLIC_PA + 0x01FFFFC);
+    volatile uint32 *plic_ctrl_pa = (uint32*)(PLIC + 0x01FFFFC);
     *plic_ctrl_pa = 1;
     
     // // 简单验证

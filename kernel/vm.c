@@ -170,13 +170,14 @@ void kvmmap(pagetable_t pagetable, uint64 va, uint64 pa, uint64 sz, uint64 perm)
 
 /*
  * kvmmake - 创建内核页表
- * 
- * 映射内容：
- * 1. 设备 MMIO (UART0, WDT0, PLIC) - 使用 PTE_IO 标志
- * 2. 内核代码段 - RX 权限，使用 PTE_THEAD_MAEE
- * 3. 内核数据段 + 物理内存 - RW 权限，使用 PTE_THEAD_MAEE
- * 4. Trampoline 页 - 共享 U/S 模式
- * 5. 每个进程的内核栈
+ * * 按照地址空间从低到高顺序进行映射：
+ * 1. 0x00200000 - etext        : 内核代码段 (Identity, RX, MAEE) [cite: 6, 20, 23]
+ * 2. etext - PHYSTOP           : 内核数据段与堆 (Identity, RW, MAEE) [cite: 6, 20, 23]
+ * 3. 0x91106000                : WDT0 外设 (Identity, RW, IO) [cite: 9, 20, 22]
+ * 4. 0x91400000                : UART0 外设 (Identity, RW, IO) [cite: 9, 20, 22]
+ * 5. 0x0F00000000              : PLIC 控制器 (Identity, RW, IO) [cite: 9, 20, 22]
+ * 6. TRAMPOLINE (High VA)      : 陷阱入口页 (High VA, RX) [cite: 7, 25]
+ * 7. KSTACKs (High VA)         : 各进程内核栈 (High VA, RW, 带 Guard Page) [cite: 7, 38]
  */
 pagetable_t
 kvmmake(void)
@@ -188,57 +189,46 @@ kvmmake(void)
     panic("kvmmake: no memory");
   memset(kpgtbl, 0, PGSIZE);
 
-  // -----------------------------
-  // 1. 设备 (MMIO) - 使用 PTE_IO 禁用缓存，强制顺序访问
-  // -----------------------------
-  kvmmap(kpgtbl,
-         UART0,
-         UART0,
-         PGSIZE,
-         PTE_R | PTE_W | PTE_A | PTE_D | PTE_IO);
+  // =============================================================
+  // 第一部分：低端等值映射区 (Identity Mapping, VA == PA)
+  // =============================================================
 
-  kvmmap(kpgtbl,
-         WDT0_BASE,
-         WDT0_BASE,
-         PGSIZE,
-         PTE_R | PTE_W | PTE_A | PTE_D | PTE_IO);
-
-  kvmmap(kpgtbl,
-         PLIC,
-         PLIC_PA,
-         0x4000000,
-         PTE_R | PTE_W | PTE_A | PTE_D | PTE_IO);
-
-  // -----------------------------
-  // 2. 内核代码段 (RX) - 使用 PTE_THEAD_MAEE 启用缓存和原子操作
-  // -----------------------------
-  kvmmap(kpgtbl,
-         KERNBASE,
-         KERNBASE,
-         (uint64)etext - KERNBASE,
+  // 1. 内核代码段 (RX): KERNBASE (0x200000) 到 etext
+  // 必须设置 PTE_A (K230 不支持硬件自动设置 [cite: 21, 47])
+  // 使用 PTE_THEAD_MAEE 开启缓存支持 [cite: 20, 23]
+  kvmmap(kpgtbl, KERNBASE, KERNBASE, (uint64)etext - KERNBASE, 
          PTE_R | PTE_X | PTE_A | PTE_THEAD_MAEE);
 
-  // -----------------------------
-  // 3. 内核数据段 + 物理 RAM (RW)
-  // -----------------------------
-  kvmmap(kpgtbl,
-         (uint64)etext,
-         (uint64)etext,
-         PHYSTOP - (uint64)etext,
+  // 2. 内核数据段 & Heap (RW): 从 etext 到 PHYSTOP (0x40000000)
+  // 必须设置 PTE_A | PTE_D 
+  kvmmap(kpgtbl, (uint64)etext, (uint64)etext, PHYSTOP - (uint64)etext, 
          PTE_R | PTE_W | PTE_A | PTE_D | PTE_THEAD_MAEE);
 
-  // -----------------------------
-  // 4. Trampoline (用户/内核共享) - 去掉 PTE_U 和 MAEE
-  // -----------------------------
-  kvmmap(kpgtbl,
-        TRAMPOLINE,
-        (uint64)trampoline,
-        PGSIZE,
-        PTE_R | PTE_X | PTE_A);
+  // 3. WDT0 设备: 0x91106000 
+  // 使用 PTE_IO 禁用缓存并强制强顺序访问 
+  kvmmap(kpgtbl, WDT0_BASE, WDT0_BASE, PGSIZE, 
+         PTE_R | PTE_W | PTE_A | PTE_D | PTE_IO);
 
-  // -----------------------------
-  // 5. 每个进程的内核栈
-  // -----------------------------
+  // 4. UART0 设备: 0x91400000 [cite: 9, 47]
+  kvmmap(kpgtbl, UART0, UART0, PGSIZE, 
+         PTE_R | PTE_W | PTE_A | PTE_D | PTE_IO);
+
+  // 5. PLIC 中断控制器: 0x0f00000000 [cite: 9, 31, 44]
+  // K230 PLIC 地址较大，但在 Sv39 范围内，依然采用等值映射
+  kvmmap(kpgtbl, PLIC, PLIC, 0x4000000, 
+         PTE_R | PTE_W | PTE_A | PTE_D | PTE_IO);
+
+  // =============================================================
+  // 第二部分：高端逻辑映射区 (High VA Mapping, VA != PA)
+  // =============================================================
+
+  // 6. Trampoline: 映射到虚拟空间最高点 (MAXVA - PGSIZE) [cite: 7, 25]
+  // 指向物理内存中的 trampoline 代码页
+  kvmmap(kpgtbl, TRAMPOLINE, (uint64)trampoline, PGSIZE, 
+         PTE_R | PTE_X | PTE_A);
+
+  // 7. 内核栈 (Kernel Stacks): 每个进程独立映射 [cite: 7, 38]
+  // 内部会调用 kvmmap 将 KSTACK(i) 映射到 kalloc() 分配的物理页
   proc_mapstacks(kpgtbl);
 
   return kpgtbl;
@@ -301,7 +291,7 @@ proc_pagetable(struct proc *p)
   if(pagetable == 0)
     return 0;
 
-  // trampoline: U/S 共享执行
+  // 映射trampoline: 所有进程共享同一个陷阱入口页
   if(mappages(pagetable,
               TRAMPOLINE,
               PGSIZE,
@@ -309,7 +299,7 @@ proc_pagetable(struct proc *p)
               PTE_R | PTE_X | PTE_A) < 0)
     goto bad;
 
-  // trapframe: 只给 S-mode 用，但在用户页表里
+  // 映射trapframe: 只给 S-mode 用，但在用户页表里，用于恢复用户上下文
   if(mappages(pagetable,
               TRAPFRAME,
               PGSIZE,
@@ -381,7 +371,7 @@ uvminit(pagetable_t pagetable, uchar *src, uint sz)
     panic("uvminit: more than a page");
   mem = kalloc();
   memset(mem, 0, PGSIZE);
-  mappages(pagetable, 0, PGSIZE, (uint64)mem, PTE_W|PTE_R|PTE_X|PTE_U|PTE_A|PTE_D|PTE_THEAD_MAEE);
+  mappages(pagetable, 0, PGSIZE, (uint64)mem, PTE_R | PTE_X | PTE_U | PTE_A | PTE_THEAD_MAEE);
 
   memmove(mem, src, sz);
 }
