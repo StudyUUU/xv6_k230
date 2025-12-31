@@ -5,6 +5,7 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "initcode.h"
 
 /*
  * xv6-k230 进程管理
@@ -34,34 +35,6 @@ struct spinlock wait_lock;
 
 static void forkret(void);
 static void freeproc(struct proc *p);
-
-// 初始用户程序的机器码
-// 测试 Fork 的 initcode
-// 行为：执行 fork，父进程打印 "Parent"，子进程打印 "Child"。
-uchar initcode[] = {
-// 1. fork()
-  0x93, 0x08, 0x10, 0x00,         // li a7, 1 (SYS_fork)
-  0x73, 0x00, 0x00, 0x00,         // ecall
-  0x63, 0x04, 0x05, 0x00,         // beqz a0, <child_branch> (offset 12)
-
-  // --- <parent_branch> ---
-  // wait(0)
-  0x13, 0x05, 0x00, 0x00,         // li a0, 0
-  0x93, 0x08, 0x30, 0x00,         // li a7, 3 (SYS_wait)
-  0x73, 0x00, 0x00, 0x00,         // ecall
-  0x6f, 0x00, 0x80, 0x00,         // j <exit_call> (offset 20)
-
-  // --- <child_branch> (offset 12) ---
-  // 这里可以放一个 getpid 或其他简单的调用来观察
-  0x93, 0x08, 0xb0, 0x00,         // li a7, 11 (SYS_getpid, 验证子进程活着)
-  0x73, 0x00, 0x00, 0x00,         // ecall
-
-  // --- <exit_call> (offset 20) ---
-  0x13, 0x05, 0x00, 0x00,         // li a0, 0 (status)
-  0x93, 0x08, 0x20, 0x00,         // li a7, 2 (SYS_exit)
-  0x73, 0x00, 0x00, 0x00,         // ecall
-  0x6f, 0xf0, 0xdf, 0xff          // j <loop>
-};
 
 
 // ============================================================================
@@ -483,6 +456,8 @@ kfork(void)
   np->state = RUNNABLE;
   release(&np->lock);
 
+  printf("[kfork] parent pid=%d forked child pid=%d\n", p->pid, np->pid);
+
   return pid;
 }
 
@@ -768,10 +743,10 @@ userinit(void)
 
   p = allocproc();
   initproc = p;
-  safestrcpy(p->name, "initcode", sizeof(p->name));  
+  safestrcpy(p->name, "user_initcode_bin", sizeof(p->name));  
   
   // 分配用户代码页，并进行映射
-  uvminit(p->pagetable, initcode, sizeof(initcode));
+  uvminit(p->pagetable, user_initcode_bin, user_initcode_bin_len);
   p->sz = PGSIZE;
 
   // 为从内核到用户的第一次"返回"做准备

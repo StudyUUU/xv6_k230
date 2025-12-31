@@ -10,12 +10,16 @@
 uint64
 sys_fork(void)
 {
+  printf("kfork called\n");
+
   return kfork();
 }
 
 uint64
 sys_exit(void)
 {
+  printf("kexit called\n");
+
   int n;
   // 获取退出状态码 exit(status)
   argint(0, &n);
@@ -26,12 +30,16 @@ sys_exit(void)
 uint64
 sys_getpid(void)
 {
+  printf("getpid called\n");
+
   return myproc()->pid;
 }
 
 uint64
 sys_wait(void)
 {
+  printf("kwait called\n");
+
   uint64 p;
   // 获取用户态传入的地址指针 wait(&status)
   argaddr(0, &p);
