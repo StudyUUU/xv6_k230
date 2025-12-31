@@ -17,6 +17,7 @@
 kernel/kernel
 kernel/kernel.asm
 kernel/kernel.sym
+kernel/initcode.h
 
 # ----------------------------------------------------------------------
 # 3. 文件系统与工具 (Filesystem & Tools - 未来会用到)
@@ -32,6 +33,10 @@ mkfs/mkfs
 # ----------------------------------------------------------------------
 # xv6 的 Makefile 通常把编译好的用户程序命名为 _init, _sh 等
 user/_*
+
+# initcode 编译产物
+user/initcode
+user/initcode.o
 
 # ----------------------------------------------------------------------
 # 5. 编辑器与 IDE 配置 (Editors & IDEs)

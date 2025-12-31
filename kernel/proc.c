@@ -456,7 +456,7 @@ kfork(void)
   np->state = RUNNABLE;
   release(&np->lock);
 
-  printf("[kfork] parent pid=%d forked child pid=%d\n", p->pid, np->pid);
+  // printf("[kfork] parent pid=%d forked child pid=%d\n", p->pid, np->pid);
 
   return pid;
 }

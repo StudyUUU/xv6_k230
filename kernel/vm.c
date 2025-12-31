@@ -462,7 +462,7 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
 {
   pte_t *pte;
   uint64 pa, i;
-  uint flags;
+  uint64 flags; // [关键] 必须是 64 位，用来存高位属性
   char *mem;
 
   for(i = 0; i < sz; i += PGSIZE){
@@ -470,11 +470,31 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
       panic("uvmcopy: pte should exist");
     if((*pte & PTE_V) == 0)
       panic("uvmcopy: page not present");
+    
     pa = PTE2PA(*pte);
-    flags = PTE_FLAGS(*pte);
+    
+    // [核心修改 START]
+    // 原来的写法: flags = PTE_FLAGS(*pte); (只取了低10位)
+    
+    // 现在的写法: 
+    // 我们需要 *pte 中除了 PPN (物理页号) 之外的所有位。
+    // 在 RISC-V Sv39 中，PPN 是 [53:10]。
+    // 0x003FFFFFFFFFFC00UL 是 PPN 的掩码 (54位物理地址空间)
+    // 取反 (~)，就是“除了PPN之外的所有位”。
+    flags = *pte & ~0x003FFFFFFFFFFC00UL;
+    
+    // 或者更简单的逻辑：保留低10位 + 保留高位(MAEE)
+    // 假设 MAEE 在 bit 59-63
+    // flags = PTE_FLAGS(*pte) | (*pte & 0xF800000000000000UL);
+    
+    // 推荐用第一种取反的方法，最通用，防止漏掉其他高位属性
+    // [核心修改 END]
+
     if((mem = kalloc()) == 0)
       goto err;
     memmove(mem, (char*)pa, PGSIZE);
+    
+    // 注意：mappages 的最后一个参数一定要改为 uint64
     if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
       kfree(mem);
       goto err;

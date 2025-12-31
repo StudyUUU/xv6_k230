@@ -20,7 +20,7 @@ sys_write(void)
   argaddr(1, &p);    // 获取 a1
   argint(2, &n);     // 获取 a2
 
-  printf("[Process %d] write(fd=%d, addr=%p, len=%d)\n", myproc()->pid, fd, p, n);
+//   printf("[Process %d] write(fd=%d, addr=%p, len=%d)\n", myproc()->pid, fd, p, n);
   
   // 2. 简单的参数检查
   if(n < 0 || n > 1024) { // 限制单次打印长度，防止内核栈溢出
