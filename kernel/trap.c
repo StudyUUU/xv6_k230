@@ -107,7 +107,7 @@ usertrap(void)
     p->trapframe->epc = sepc;
 
     if(scause == 8){
-        printf("[usertrap] System call from user mode\n");
+        printf("[SUCCESS] Syscall caught from PID %d\n", p->pid);
         // 系统调用 (ecall from U-mode)
         
         // // 检查进程是否已被杀死 (可选)

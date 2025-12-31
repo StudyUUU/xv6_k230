@@ -21,9 +21,13 @@ struct proc;
 // ============================================================================
 // 字符串和内存操作 (string.c)
 // ============================================================================
-void* memset(void *dst, int c, uint n);
-void* memmove(void *dst, const void *src, uint n);
-void* memcpy(void *dst, const void *src, uint n);
+int memcmp(const void*, const void*, uint);
+void* memmove(void*, const void*, uint);
+void* memset(void*, int, uint);
+char* safestrcpy(char*, const char*, int);
+int strlen(const char*);
+int strncmp(const char*, const char*, uint);
+char* strncpy(char*, const char*, int);
 
 // ============================================================================
 // 物理内存分配器 (kalloc.c)
@@ -66,21 +70,38 @@ int copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max);
 // ============================================================================
 
 // --- CPU 管理 ---
-int cpuid(void);            // 获取当前 CPU ID
-struct cpu* mycpu(void);    // 获取当前 CPU 结构体
-void cpuinit(void);         // 初始化当前 CPU
-struct proc* myproc(void);  // 获取当前进程
+int cpuid(void);               // 获取当前 CPU ID
+struct cpu* mycpu(void);       // 获取当前 CPU 结构体
+void cpuinit(void);            // 初始化当前 CPU
+struct proc* myproc(void);     // 获取当前进程
 
-// --- 进程初始化和调度 ---
-void procinit(void);        // 初始化进程表
-void userinit(void);        // 创建第一个用户进程
-void scheduler(void);       // 调度器主循环（永不返回）
+// --- 进程表初始化 ---
+void procinit(void);           // 初始化进程表
+
+// --- 进程创建和销毁 ---
+void userinit(void);           // 创建第一个用户进程
+int kfork(void);            // 创建子进程
+void kexit(int status);        // 终止当前进程
+int kwait(uint64 addr);        // 等待子进程退出并回收资源
+
+// --- 调度器 ---
+void scheduler(void);          // 调度器主循环（永不返回）
+void yield(void);              // 主动让出 CPU
+
+// --- 睡眠与唤醒 ---
+void sleep(void *chan, struct spinlock *lk);  // 睡眠等待 chan，释放 lk
+void wakeup(void *chan);                      // 唤醒等待 chan 的所有进程
+
+// --- 信号和终止 ---
+int kkill(int pid);            // 向指定进程发送终止信号
+int killed(struct proc *p);    // 检查进程是否被标记为 killed
+void setkilled(struct proc *p);// 设置进程的 killed 标志
 
 // --- 用户态切换辅助 ---
-void prepare_return(void);  // 准备返回用户空间
+void prepare_return(void);     // 准备从内核返回用户空间
 
-// --- 测试代码 ---
-void test_proc_init(void);  // 创建测试进程（仅用于调试）
+// --- 测试代码（仅用于调试） ---
+void test_proc_init(void);     // 创建测试进程用于协作式多任务测试
 
 // ============================================================================
 // 同步原语 (spinlock.c)
