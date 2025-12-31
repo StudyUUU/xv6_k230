@@ -36,22 +36,31 @@ static void forkret(void);
 static void freeproc(struct proc *p);
 
 // 初始用户程序的机器码
+// 测试 Fork 的 initcode
+// 行为：执行 fork，父进程打印 "Parent"，子进程打印 "Child"。
 uchar initcode[] = {
-  // 0. li a0, 1
-  0x13, 0x05, 0x10, 0x00, 
-  // 4. li a1, 24 (0x18) -> 加载字符串数据的地址
-  0x93, 0x05, 0x80, 0x01, 
-  // 8. li a2, 6 (长度 6)
-  0x13, 0x06, 0x60, 0x00, 
-  // 12. li a7, 16 (SYS_write)
-  0x93, 0x08, 0x00, 0x01, 
-  // 16. ecall
-  0x73, 0x00, 0x00, 0x00, 
-  // 20. j 0 (死循环，防止跑飞)
-  0x6f, 0x00, 0x00, 0x00,
-  // --- 偏移量 24：数据区 ---
-  // H, e, l, l, o, \n
-  0x48, 0x65, 0x6c, 0x6c, 0x6f, 0x0a
+// 1. fork()
+  0x93, 0x08, 0x10, 0x00,         // li a7, 1 (SYS_fork)
+  0x73, 0x00, 0x00, 0x00,         // ecall
+  0x63, 0x04, 0x05, 0x00,         // beqz a0, <child_branch> (offset 12)
+
+  // --- <parent_branch> ---
+  // wait(0)
+  0x13, 0x05, 0x00, 0x00,         // li a0, 0
+  0x93, 0x08, 0x30, 0x00,         // li a7, 3 (SYS_wait)
+  0x73, 0x00, 0x00, 0x00,         // ecall
+  0x6f, 0x00, 0x80, 0x00,         // j <exit_call> (offset 20)
+
+  // --- <child_branch> (offset 12) ---
+  // 这里可以放一个 getpid 或其他简单的调用来观察
+  0x93, 0x08, 0xb0, 0x00,         // li a7, 11 (SYS_getpid, 验证子进程活着)
+  0x73, 0x00, 0x00, 0x00,         // ecall
+
+  // --- <exit_call> (offset 20) ---
+  0x13, 0x05, 0x00, 0x00,         // li a0, 0 (status)
+  0x93, 0x08, 0x20, 0x00,         // li a7, 2 (SYS_exit)
+  0x73, 0x00, 0x00, 0x00,         // ecall
+  0x6f, 0xf0, 0xdf, 0xff          // j <loop>
 };
 
 
@@ -262,16 +271,11 @@ scheduler(void)
     for(p = proc; p < &proc[NPROC]; p++) {
       acquire(&p->lock);
       if(p->state == RUNNABLE) {
-        printf("[Scheduler] CPU %d: Switching to process %d\n", cpuid(), p->pid);
-        printf("process name: %s\n", p->name);
-        
         // 切换到选定的进程
         // 进程的工作是释放其锁，然后在跳回调度器之前重新获取锁
         p->state = RUNNING;
         c->proc = p;
         swtch(&c->context, &p->context);
-        printf("[Scheduler] CPU %d: Returned from process %d\n", cpuid(), p->pid);
-        
         // 进程已运行完毕
         c->proc = 0;
         found = 1;
@@ -432,42 +436,49 @@ kfork(void)
   struct proc *np;
   struct proc *p = myproc();
 
-  // 分配新进程结构（返回时持有 np->lock）
-  if((np = allocproc()) == 0) {
+  // 1. 分配进程结构 (分配 PID、内核栈、陷阱帧等)
+  if((np = allocproc()) == 0){
     return -1;
   }
 
-  // 复制父进程的用户内存到子进程
-  if(uvmcopy(p->pagetable, np->pagetable, p->sz) < 0) {
+  // 2. 复制父进程的用户内存到子进程
+  if(uvmcopy(p->pagetable, np->pagetable, p->sz) < 0){
     freeproc(np);
     release(&np->lock);
     return -1;
   }
   np->sz = p->sz;
 
-  // 复制父进程的 trapframe（所有寄存器状态）
+  // 3. 复制父进程的寄存器状态 (Trapframe)
+  // *np->trapframe = *p->trapframe 这种结构体赋值在 C 中是合法的
   *(np->trapframe) = *(p->trapframe);
 
-  // 使子进程的 fork 返回 0
-  // a0 寄存器用于存放系统调用返回值
+  // 4. 修改子进程的返回值为 0
+  // a0 寄存器在系统调用返回时存放返回值
   np->trapframe->a0 = 0;
 
-  // 复制打开的文件描述符（当前未实现文件系统，跳过此步骤）
-  // TODO: 实现文件系统后需要添加文件描述符复制逻辑
+  // 5. 复制文件描述符 (目前暂未实现文件系统，留作占位)
+  /*
+  for(int i = 0; i < NOFILE; i++)
+    if(p->ofile[i])
+      np->ofile[i] = filedup(p->ofile[i]);
+  np->cwd = idup(p->cwd);
+  */
 
-  // 复制进程名称
+  // 6. 复制进程名称用于调试
   safestrcpy(np->name, p->name, sizeof(p->name));
 
   pid = np->pid;
 
+  // 7. 释放 allocproc 时获取的 np->lock
   release(&np->lock);
 
-  // 设置父子进程关系（需要 wait_lock 保护）
+  // 8. 建立父子关系
   acquire(&wait_lock);
   np->parent = p;
   release(&wait_lock);
 
-  // 标记子进程为可运行状态
+  // 9. 标记子进程为可运行
   acquire(&np->lock);
   np->state = RUNNABLE;
   release(&np->lock);
@@ -757,7 +768,7 @@ userinit(void)
 
   p = allocproc();
   initproc = p;
-  initproc->name = "initcode";
+  safestrcpy(p->name, "initcode", sizeof(p->name));  
   
   // 分配用户代码页，并进行映射
   uvminit(p->pagetable, initcode, sizeof(initcode));

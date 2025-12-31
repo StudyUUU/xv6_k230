@@ -20,8 +20,8 @@ sys_write(void)
   argaddr(1, &p);    // 获取 a1
   argint(2, &n);     // 获取 a2
 
-	printf("[sys_write] fd=%d, buf_addr=%p, len=%d\n", fd, p, n);
-
+  printf("[Process %d] write(fd=%d, addr=%p, len=%d)\n", myproc()->pid, fd, p, n);
+  
   // 2. 简单的参数检查
   if(n < 0 || n > 1024) { // 限制单次打印长度，防止内核栈溢出
       return -1;
@@ -51,7 +51,7 @@ sys_write(void)
       printf("%s", kbuf); 
   } else {
       // 暂时还不支持文件写入，只打印调试信息
-      printf("[sys_write] fd=%d, addr=%p, len=%d, content=%s\n", fd, p, n, kbuf);
+      
   }
 
   return n; // 返回实际写入的字节数

@@ -32,6 +32,7 @@ OBJS = \
   $K/wdt.o\
   $K/syscall.o \
   $K/sysfile.o \
+  $K/sysproc.o \
   # 将来在这里添加 $K/vm.o $K/proc.o ...
 
 # 最终目标
