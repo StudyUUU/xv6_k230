@@ -29,7 +29,9 @@ OBJS = \
   $K/plic.o \
   $K/swtch.o\
   $K/trampoline.o\
-  $K/wdt.o
+  $K/wdt.o\
+  $K/syscall.o \
+  $K/sysfile.o \
   # 将来在这里添加 $K/vm.o $K/proc.o ...
 
 # 最终目标

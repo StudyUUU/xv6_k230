@@ -145,6 +145,16 @@ void panic(const char *s);  // 内核恐慌（打印错误并停机）
 int uartgetc(void);         // 获取一个字符（非阻塞）
 void uartintr(void);        // UART 中断处理
 
+// syscall.c
+void            argint(int, int*);
+int             argstr(int, char*, int);
+void            argaddr(int, uint64 *);
+int             fetchstr(uint64, char*, int);
+int             fetchaddr(uint64, uint64*);
+void            syscall();
+// 获得固定数组的数量
+#define NELEM(x) (sizeof(x)/sizeof((x)[0]))
+
 // ============================================================================
 // K230 硬件外设
 // ============================================================================

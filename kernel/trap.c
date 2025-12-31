@@ -117,8 +117,11 @@ usertrap(void)
         // sepc 指向的是 ecall 指令，返回后需要执行下一条指令
         p->trapframe->epc += 4;
 
+        // an interrupt will change sepc, scause, and sstatus,
+        // so enable only now that we're done with those registers.
+        intr_on();
         // 这里以后可以调用 syscall() 处理具体的系统调用
-        // syscall();
+        syscall();
     } else if(scause == 0x8000000000000005L){
         // 时钟中断 (Supervisor timer interrupt)
         // K230 使用 Sstc，需要重置 stimecmp 以清除中断并预设下一次中断

@@ -99,7 +99,12 @@
 
 // --- PTE 与物理地址转换 ---
 #define PA2PTE(pa) ((((uint64)pa) >> 12) << 10)  // 物理地址 → PTE（[53:10]位）
-#define PTE2PA(pte) (((pte) >> 10) << 12)        // PTE → 物理地址
+// [修正] PTE 到 PA：增加掩码，过滤掉 C908 的高位属性 (MAEE)
+// 0x3FFFFFFFFFFFFF 是 54 位的掩码 (Sv39 物理地址有效位)
+// 这样可以把 Bit 54 以上的脏数据全部清零
+#define PTE2PA(pte) ((((pte) >> 10) << 12) & 0x00FFFFFFFFFFFF00L) 
+// 或者更严谨的 Sv39 写法 (保留低 56 位物理地址)：
+// #define PTE2PA(pte) ((((pte) >> 10) & 0x0FFFFFFFFFFFL) << 12)
 #define PTE_FLAGS(pte) ((pte) & 0x3FF)           // 提取低 10 位标志
 
 // --- Sv39 三级页表索引计算 ---

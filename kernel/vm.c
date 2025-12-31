@@ -487,6 +487,69 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   return -1;
 }
 
+int
+ismapped(pagetable_t pagetable, uint64 va)
+{
+  pte_t *pte = walk(pagetable, va, 0);
+  if (pte == 0) {
+    return 0;
+  }
+  if (*pte & PTE_V){
+    return 1;
+  }
+  return 0;
+}
+// Look up a virtual address, return the physical address,
+// or 0 if not mapped.
+// Can only be used to look up user pages.
+uint64
+walkaddr(pagetable_t pagetable, uint64 va)
+{ 
+  pte_t *pte;
+  uint64 pa;
+
+  if(va >= MAXVA)
+    return 0;
+
+  pte = walk(pagetable, va, 0);
+
+  if(pte == 0)
+    return 0;
+  if((*pte & PTE_V) == 0)
+    return 0;
+  if((*pte & PTE_U) == 0)
+    return 0;
+
+  pa = PTE2PA(*pte);
+  return pa;
+}
+// allocate and map user memory if process is referencing a page
+// that was lazily allocated in sys_sbrk().
+// returns 0 if va is invalid or already mapped, or if
+// out of physical memory, and physical address if successful.
+uint64
+vmfault(pagetable_t pagetable, uint64 va, int read)
+{
+  uint64 mem;
+  struct proc *p = myproc();
+
+  if (va >= p->sz)
+    return 0;
+  va = PGROUNDDOWN(va);
+  if(ismapped(pagetable, va)) {
+    return 0;
+  }
+  mem = (uint64) kalloc();
+  if(mem == 0)
+    return 0;
+  memset((void *) mem, 0, PGSIZE);
+  if (mappages(p->pagetable, va, PGSIZE, mem, PTE_W|PTE_U|PTE_R) != 0) {
+    kfree((void *)mem);
+    return 0;
+  }
+  return mem;
+}
+
 /*
  * copyout - 从内核复制到用户空间
  * @pagetable: 用户页表
@@ -506,11 +569,19 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
     va0 = PGROUNDDOWN(dstva);
     if(va0 >= MAXVA)
       return -1;
+  
+    pa0 = walkaddr(pagetable, va0);
+    if(pa0 == 0) {
+      if((pa0 = vmfault(pagetable, va0, 0)) == 0) {
+        return -1;
+      }
+    }
+
     pte = walk(pagetable, va0, 0);
-    if(pte == 0 || (*pte & PTE_V) == 0 || (*pte & PTE_U) == 0 ||
-       (*pte & PTE_W) == 0)
+    // forbid copyout over read-only user text pages.
+    if((*pte & PTE_W) == 0)
       return -1;
-    pa0 = PTE2PA(*pte);
+      
     n = PGSIZE - (dstva - va0);
     if(n > len)
       n = len;
@@ -536,16 +607,15 @@ int
 copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 {
   uint64 n, va0, pa0;
-  pte_t *pte;
 
   while(len > 0){
     va0 = PGROUNDDOWN(srcva);
-    if(va0 >= MAXVA)
-      return -1;
-    pte = walk(pagetable, va0, 0);
-    if(pte == 0 || (*pte & PTE_V) == 0 || (*pte & PTE_U) == 0)
-      return -1;
-    pa0 = PTE2PA(*pte);
+    pa0 = walkaddr(pagetable, va0);
+    if(pa0 == 0) {
+      if((pa0 = vmfault(pagetable, va0, 0)) == 0) {
+        return -1;
+      }
+    }
     n = PGSIZE - (srcva - va0);
     if(n > len)
       n = len;
@@ -555,6 +625,7 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
     dst += n;
     srcva = va0 + PGSIZE;
   }
+  
   return 0;
 }
 
