@@ -52,6 +52,7 @@ static int uart_tx_chan;      // 等待通道（地址）
 
 // 用于 panic 时的无锁输出
 extern volatile int panicking;
+extern volatile int panicked;
 
 void
 uartinit(void)
@@ -106,6 +107,11 @@ uartputc_sync(int c)
 {
   if(panicking == 0)
     push_off();
+
+  if(panicked){
+    for(;;)
+      ;
+  }
 
   // wait for UART to set Transmit Holding Empty in LSR.
   while((ReadReg(LSR) & LSR_TX_IDLE) == 0)
