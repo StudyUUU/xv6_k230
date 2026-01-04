@@ -164,8 +164,11 @@ found:
   p->pid = allocpid();
   p->state = USED;
 
+  printf("[allocproc] allocated pid=%d\n", p->pid);
+
   // 分配 trapframe 页
   if((p->trapframe = (struct trapframe *)kalloc()) == 0) {
+    printf("[allocproc] kalloc trapframe failed\n");
     freeproc(p);
     release(&p->lock);
     return 0;
@@ -174,6 +177,7 @@ found:
   // 创建用户页表，包含 trampoline 和 trapframe 映射
   p->pagetable = proc_pagetable(p);
   if(p->pagetable == 0) {
+    printf("[allocproc] proc_pagetable failed\n");
     freeproc(p);
     release(&p->lock);
     return 0;
@@ -183,6 +187,8 @@ found:
   memset(&p->context, 0, sizeof(p->context));
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
+
+  printf("[allocproc] pid=%d setup complete, kstack=0x%lx\n", p->pid, p->kstack);
 
   return p;
 }
@@ -233,34 +239,63 @@ scheduler(void)
   struct proc *p;
   struct cpu *c = mycpu();
 
+  printf("[scheduler] hart %d entering scheduler loop\n", cpuid());
+  printf("[scheduler] proc table at 0x%lx, NPROC=%d\n", (uint64)proc, NPROC);
+  
   c->proc = 0;
+  
+  printf("[scheduler] about to start infinite loop\n");
+  
   for(;;) {
-    // 启用中断以避免所有进程都在等待时发生死锁
-    // 然后再次关闭中断以避免中断和 wfi 之间的竞态条件
-    intr_on();
-    intr_off();
+    printf("[scheduler] loop iteration start\n");
+    
+    // intr_on();
+    // printf("[scheduler] intr_on done\n");
+    
+    // intr_off();
+    // printf("[scheduler] intr_off done\n");
 
     int found = 0;
+    static int debug_count = 0;
+    
+    printf("[scheduler] starting proc scan, debug_count=%d\n", debug_count);
+    
     for(p = proc; p < &proc[NPROC]; p++) {
+      int idx = p - proc;
+      
+      if(debug_count < 2 && idx < 5) {  // 只打印前5个
+        printf("[scheduler] about to acquire lock for proc[%d] at 0x%lx\n", idx, (uint64)p);
+      }
+      
       acquire(&p->lock);
+      
+      if(debug_count < 2 && idx < 5) {
+        printf("[scheduler] proc[%d]: state=%d pid=%d\n", idx, p->state, p->pid);
+      }
+      
       if(p->state == RUNNABLE) {
+        printf("[scheduler] running pid=%d name=%s\n", p->pid, p->name);
         
-        if (p->pid == 1) {
-            printf("scheduler: running init proc\n");
-        }
-        // 切换到选定的进程
-        // 进程的工作是释放其锁，然后在跳回调度器之前重新获取锁
         p->state = RUNNING;
         c->proc = p;
         swtch(&c->context, &p->context);
-        // 进程已运行完毕
         c->proc = 0;
         found = 1;
       }
       release(&p->lock);
     }
+    
+    if(debug_count < 2) {
+      printf("[scheduler] scan complete, found=%d\n", found);
+      debug_count++;
+    }
+    
     if(found == 0) {
-      // 没有可运行的进程，停止在此核心上运行直到有中断
+      static int wfi_count = 0;
+      if(wfi_count < 5) {
+        printf("[scheduler] no runnable process, entering wfi\n");
+        wfi_count++;
+      }
       asm volatile("wfi");
     }
   }
@@ -736,6 +771,8 @@ forkret(void)
   static int first = 1;
   struct proc *p = myproc();
 
+  printf("[forkret] pid=%d name=%s entering\n", p->pid, p->name);
+  
   // 仍然持有来自 scheduler 的 p->lock
   release(&p->lock);
 
@@ -746,6 +783,8 @@ forkret(void)
   
   // 返回到用户空间，模仿 usertrap() 的返回
   prepare_return();
+  
+  printf("[forkret] pid=%d about to jump to userret, epc=0x%lx\n", p->pid, p->trapframe->epc);
   
   // 跳转到 trampoline.S 中的 userret 以返回用户态
   // 切换页表，并且切换到用户态
@@ -770,7 +809,14 @@ userinit(void)
 {
   struct proc *p;
 
+  printf("[userinit] starting...\n");
+  
   p = allocproc();
+  if(p == 0)
+    panic("userinit: allocproc failed");
+  
+  printf("[userinit] allocproc returned pid=%d\n", p->pid);
+  
   initproc = p;
   safestrcpy(p->name, "user_initcode_bin", sizeof(p->name));  
   
@@ -784,7 +830,12 @@ userinit(void)
 
   p->state = RUNNABLE;
 
+  printf("[userinit] pid=%d state=RUNNABLE name=%s epc=0x%lx\n", 
+         p->pid, p->name, p->trapframe->epc);
+
   release(&p->lock);
+  
+  printf("[userinit] completed\n");
 }
 
 // Print a process listing to console.  For debugging.
