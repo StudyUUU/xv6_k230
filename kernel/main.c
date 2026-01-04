@@ -19,6 +19,12 @@ void main()
 		trap_init();
 		plicinit();
 		plicinithart();
+
+		binit();         // buffer cache
+		iinit();         // inode table
+		fileinit();      // file table
+		ramdisk_init();
+		
 		userinit();
 
 		printf("hart %d starting\n", cpuid());

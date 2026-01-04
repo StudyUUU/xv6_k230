@@ -244,6 +244,10 @@ scheduler(void)
     for(p = proc; p < &proc[NPROC]; p++) {
       acquire(&p->lock);
       if(p->state == RUNNABLE) {
+        
+        if (p->pid == 1) {
+            printf("scheduler: running init proc\n");
+        }
         // 切换到选定的进程
         // 进程的工作是释放其锁，然后在跳回调度器之前重新获取锁
         p->state = RUNNING;
@@ -375,6 +379,31 @@ wakeup(void *chan)
     }
   }
 }
+
+
+// Grow or shrink user memory by n bytes.
+// Return 0 on success, -1 on failure.
+int
+growproc(int n)
+{
+  uint64 sz;
+  struct proc *p = myproc();
+
+  sz = p->sz;
+  if(n > 0){
+    if(sz + n > TRAPFRAME) {
+      return -1;
+    }
+    if((sz = uvmalloc(p->pagetable, sz, sz + n, PTE_W)) == 0) {
+      return -1;
+    }
+  } else if(n < 0){
+    sz = uvmdealloc(p->pagetable, sz, sz + n);
+  }
+  p->sz = sz;
+  return 0;
+}
+
 
 // ============================================================================
 //                            进程创建和退出

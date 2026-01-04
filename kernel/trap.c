@@ -96,58 +96,73 @@ usertrap(void)
     if((r_sstatus() & SSTATUS_SPP) != 0)
         panic("usertrap: not from user");
 
-    // 将中断向量设置为内核态的 kernelvec，防止在处理该中断的过程中再次发生中断导致错误跳转
     w_stvec((uint64)kernelvec);
 
     uint64 scause = r_scause();
     uint64 sepc   = r_sepc();
     uint64 stval  = r_stval();
 
-    // 保存用户程序的 pc，以便后续恢复或修改
     p->trapframe->epc = sepc;
 
     if(scause == 8){
-        // 系统调用 (ecall from U-mode)
-        
-        // // 检查进程是否已被杀死 (可选)
+        // --- [调试信息] 系统调用 ---
+        // 如果看到这条打印，说明 initcode 成功执行到了 ecall
+        printf("[usertrap] syscall: pid=%d name=%s epc=0x%lx\n", p->pid, p->name, sepc);
+
         // if(p->killed)
         //     exit(-1);
 
-        // sepc 指向的是 ecall 指令，返回后需要执行下一条指令
         p->trapframe->epc += 4;
 
-        // an interrupt will change sepc, scause, and sstatus,
-        // so enable only now that we're done with those registers.
         intr_on();
-        // 这里以后可以调用 syscall() 处理具体的系统调用
         syscall();
-    } else if(scause == 0x8000000000000005L){
-        // 时钟中断 (Supervisor timer interrupt)
-        // K230 使用 Sstc，需要重置 stimecmp 以清除中断并预设下一次中断
+    } 
+    else if(scause == 0x8000000000000005L){
+        // --- 时钟中断 ---
         set_timer(r_time() + CLOCK_INTERVAL);
-        // 可以在这里调用 yield() 让出 CPU 给其他进程
-        // yield();
-    } else if(scause == 0x8000000000000009L){
-        int irq = plic_claim();
         
+        // 建议：打印一下，确认 CPU 没有卡死，但只在 PID 1 时打印，避免刷屏
+        // if(p->pid == 1) printf("."); 
+
+        // 建议：恢复 yield()，这是多任务调度的基础
+        // 如果只有一个 init 进程，它会立即重新被调度回来，这没问题
+        yield(); 
+    } 
+    else if(scause == 0x8000000000000009L){
+        // --- 外部中断 (UART 等) ---
+        int irq = plic_claim();
         if(irq == UART0_IRQ) {
-            // 如果是 UART0 (IRQ 16)
             uartintr();
-        } 
-        else if(irq != 0) {
-            // 处理非预期的其他硬件中断
+        } else if(irq != 0) {
             printf("unexpected external interrupt: irq=%d\n", irq);
         }
-        
-        // 告诉 PLIC 该中断已处理完成
         if(irq) {
             plic_complete(irq);
         }
-    }else {
-        printf("\n[usertrap] Unexpected scause 0x%lx\n", scause);
-        printf("[usertrap] sepc=0x%lx stval=0x%lx\n", sepc, stval);
-        panic("usertrap");
     }
+    else {
+        // --- [关键调试信息] 异常捕捉 ---
+        // 这里会捕获 Page Fault (缺页), Illegal Instruction (非法指令) 等
+        printf("\n=== usertrap: unexpected exception ===\n");
+        printf("scause = 0x%lx ", scause);
+        
+        // 解析常见错误原因
+        if(scause == 12) printf("(Instruction Page Fault)\n");
+        else if(scause == 13) printf("(Load Page Fault)\n");
+        else if(scause == 15) printf("(Store/AMO Page Fault)\n");
+        else if(scause == 2) printf("(Illegal Instruction)\n");
+        else printf("(Unknown)\n");
+
+        printf("pid    = %d (%s)\n", p->pid, p->name);
+        printf("sepc   = 0x%lx (Error PC)\n", sepc);
+        printf("stval  = 0x%lx (Bad Addr)\n", stval);
+        printf("======================================\n");
+        
+        p->killed = 1;
+    }
+
+    // if(p->killed)
+    //     exit(-1);
 
     prepare_return();
 
