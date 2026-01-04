@@ -18,7 +18,7 @@ void main();
 
 void start()
 {
-    uart_puts("we are in M-mode start()\n");
+    // uart_puts("we are in M-mode start()\n");
 
     // 1. 设置 M-mode 状态 -> 切到 S-mode
     unsigned long x = r_mstatus();
@@ -73,7 +73,7 @@ void start()
     int id = r_mhartid();
     w_tp(id);
 
-    uart_puts("mret to S-mode main\n"); 
+    // uart_puts("mret to S-mode main\n"); 
 
     asm volatile("fence.i"); 
     asm volatile("mret"); // mret 指令实现的是从异常中返回，恢复到 mepc 指向的地址，并切换到 mstatus.MPP 中指定的特权级别

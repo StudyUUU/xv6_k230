@@ -66,6 +66,8 @@ uint64 uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz, int xperm);
 uint64 uvmdealloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz);
 void uvmfree(pagetable_t pagetable, uint64 sz);
 int uvmcopy(pagetable_t old, pagetable_t new, uint64 sz);
+uint64 walkaddr(pagetable_t pagetable, uint64 va);
+void uvmclear(pagetable_t pagetable, uint64 va);
 
 // --- 内核/用户空间数据复制 ---
 int copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len);
@@ -105,6 +107,8 @@ void wakeup(void *chan);                      // 唤醒等待 chan 的所有进�
 int kkill(int pid);            // 向指定进程发送终止信号
 int killed(struct proc *p);    // 检查进程是否被标记为 killed
 void setkilled(struct proc *p);// 设置进程的 killed 标志
+
+void procdump(void);                     // 打印进程列表（调试用）
 
 // --- 用户态切换辅助 ---
 void prepare_return(void);     // 准备从内核返回用户空间
@@ -154,13 +158,31 @@ void plic_complete(int irq);// 完成一个中断
 // ============================================================================
 // UART 串口驱动 (uart.c)
 // ============================================================================
-void uartinit(void);        // 初始化 UART0
-void printfinit(void);      // 初始化 printf 锁
-void uart_puts(char *s);    // 输出字符串
-void printf(const char *fmt, ...);  // 格式化输出
-void panic(const char *s);  // 内核恐慌（打印错误并停机）
-int uartgetc(void);         // 获取一个字符（非阻塞）
-void uartintr(void);        // UART 中断处理
+void uartinit(void);            // 初始化 UART0
+int uartgetc(void);             // 获取一个字符（非阻塞）
+void uartintr(void);            // UART 中断处理
+void uartputc_sync(int c);      // 同步输出单个字符（供 console 使用）
+void uart_puts(char *s);        // 同步输出字符串（供 M-mode 早期启动）
+void uartwrite(char buf[], int n);  // 批量写入（供 console 使用）
+
+// ============================================================================
+// Console 控制台 (console.c)
+// ============================================================================
+void consoleinit(void);         // console 初始化
+void consoleintr(int);          // console 中断处理
+void consputc(int);             // console 输出单字符（处理退格等特殊字符）
+int consoleread(int, uint64, int);   // console 读
+int consolewrite(int, uint64, int);  // console 写
+
+// ============================================================================
+// 格式化输出 (printf.c)
+// ============================================================================
+void printfinit(void);          // 初始化 printf 锁
+int  printf(char*, ...) __attribute__ ((format (printf, 1, 2)));
+void panic(char*) __attribute__((noreturn));
+
+// exec.c
+int             kexec(char*, char**);
 
 // syscall.c
 void            argint(int, int*);

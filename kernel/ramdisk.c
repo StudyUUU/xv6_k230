@@ -16,7 +16,7 @@ void
 ramdisk_init(void)
 {
   uint64 size = fs_img_end - fs_img_start;
-  printf("ramdisk: mapped at %p - %p, size %d KB\n", 
+  printf("ramdisk: mapped at %p - %p, size %ld KB\n", 
          fs_img_start, fs_img_end, size / 1024);
 }
 

@@ -65,7 +65,7 @@ void kerneltrap() {
         // 3. 其他类型的中断
         // -------------------------------------------------------
         else {
-            printf("unexpected interrupt: scause=%p, sepc=%p\n", scause, sepc);
+            printf("unexpected interrupt: scause=%lx, sepc=%lx\n", scause, sepc);
         }
     } 
     // 检查是否为异常 (scause 最高位为 0)
@@ -74,9 +74,9 @@ void kerneltrap() {
         // 4. 异常处理 (如 Page Fault, Illegal Instruction 等)
         // -------------------------------------------------------
         printf("\n<<<< KERNEL PANIC: EXCEPTION >>>>\n");
-        printf("scause: %p\n", scause);
-        printf("sepc:   %p (Instruction address)\n", sepc);
-        printf("stval:  %p (Faulting address/value)\n", stval);
+        printf("scause: 0x%lx\n", scause);
+        printf("sepc:   0x%lx (Instruction address)\n", sepc);
+        printf("stval:  0x%lx (Faulting address/value)\n", stval);
         
         // 发生内核异常时，系统无法继续运行，通过看门狗重启系统
         k230_wdt_reboot();
@@ -144,8 +144,8 @@ usertrap(void)
             plic_complete(irq);
         }
     }else {
-        printf("\n[usertrap] Unexpected scause %p\n", scause);
-        printf("[usertrap] sepc=%p stval=%p\n", sepc, stval);
+        printf("\n[usertrap] Unexpected scause 0x%lx\n", scause);
+        printf("[usertrap] sepc=0x%lx stval=0x%lx\n", sepc, stval);
         panic("usertrap");
     }
 

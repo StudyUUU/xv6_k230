@@ -4,7 +4,7 @@
 void main()
 {
 	if(cpuid() == 0){
-		uartinit();
+		consoleinit();
 		printfinit();
 
 		printf("\n");

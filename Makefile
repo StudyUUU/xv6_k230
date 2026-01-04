@@ -21,6 +21,8 @@ KOBJS = \
   $K/entry.o \
   $K/start.o \
   $K/uart.o \
+  $K/printf.o \
+  $K/console.o \
   $K/kalloc.o \
   $K/main.o \
   $K/string.o \
@@ -44,7 +46,8 @@ KOBJS = \
   $K/file.o \
   $K/pipe.o \
   $K/ramdisk.o \
-  $K/ramdisk_img.o
+  $K/ramdisk_img.o \
+  $K/exec.o
 
 # =========================================================
 # User / FS build config
@@ -106,7 +109,6 @@ fs.img: $(MKFS) $(UPROGS)
 kernel.bin: $(KOBJS) $(K)/kernel.ld $(INITCODE_H) fs.img
 	$(LD) -T $(K)/kernel.ld -o kernel.elf $(KOBJS)
 	$(OBJCOPY) -O binary kernel.elf kernel.bin
-	# 自动拷贝到 tftp 目录 (根据你的环境保留或注释)
 	cp kernel.bin /home/alientek/linux/tftp/
 
 # 通用编译规则 (.c -> .o)
