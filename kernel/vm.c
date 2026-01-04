@@ -296,7 +296,7 @@ proc_pagetable(struct proc *p)
               TRAMPOLINE,
               PGSIZE,
               (uint64)trampoline,
-              PTE_R | PTE_X | PTE_A | PTE_THEAD_MAEE) < 0)
+              PTE_R | PTE_X | PTE_A) < 0)
     goto bad;
 
   // 映射trapframe: 只给 S-mode 用，但在用户页表里，用于恢复用户上下文
