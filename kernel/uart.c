@@ -1,8 +1,3 @@
-//
-// DW8250 UART 驱动 for K230
-// 基于标准 xv6 uart.c 重构，适配 K230/C908 硬件特性
-//
-
 #include "types.h"
 #include "param.h"
 #include "memlayout.h"
@@ -10,9 +5,14 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include <stdarg.h>
 
 // ====================================================================
-// 硬件寄存器定义
+// DW8250 UART 驱动 (K230 UART0)
+// ====================================================================
+
+// ====================================================================
+// 1. 硬件寄存器定义
 // ====================================================================
 
 // K230 UART0 寄存器访问宏 (32位对齐，4字节步进)
@@ -20,151 +20,364 @@
 #define ReadReg(reg) (*(Reg(reg)))
 #define WriteReg(reg, v) (*(Reg(reg)) = (v))
 
-// DW8250 寄存器偏移
+// DW8250 标准寄存器偏移
 #define RHR 0                 // Receive Holding Register (Read)
 #define THR 0                 // Transmit Holding Register (Write)
 #define IER 1                 // Interrupt Enable Register
-#define IER_RX_ENABLE (1<<0)
-#define IER_TX_ENABLE (1<<1)
+#define IER_RX_ENABLE (1<<0)  // 接收中断使能
+#define IER_TX_ENABLE (1<<1)  // 发送中断使能
+
 #define FCR 2                 // FIFO Control Register
 #define FCR_FIFO_ENABLE (1<<0)
-#define FCR_FIFO_CLEAR (3<<1)
-#define ISR 2                 // Interrupt Status Register (Read)
+#define FCR_FIFO_CLEAR (3<<1) // 清空 RX & TX FIFO
+
+#define ISR 2                 // Interrupt Status Register (Read, same address as FCR)
+
 #define LCR 3                 // Line Control Register
-#define LCR_EIGHT_BITS (3<<0)
-#define LCR_BAUD_LATCH (1<<7)
+#define LCR_EIGHT_BITS (3<<0) // 8 数据位
+#define LCR_BAUD_LATCH (1<<7) // 波特率除数锁存访问
+
 #define MCR 4                 // Modem Control Register
-#define MCR_DTR  (1<<0)
-#define MCR_RTS  (1<<1)
-#define MCR_OUT2 (1<<3)       // K230: UART 中断总开关
+#define MCR_DTR  (1<<0)       // Data Terminal Ready
+#define MCR_RTS  (1<<1)       // Request To Send
+#define MCR_OUT2 (1<<3)       // OUT2: UART 中断总开关
+
 #define LSR 5                 // Line Status Register
-#define LSR_RX_READY (1<<0)
-#define LSR_TX_IDLE (1<<5)
+#define LSR_RX_READY (1<<0)   // 接收数据就绪
+#define LSR_TX_IDLE (1<<5)    // 发送器空闲
+
+#define MSR 6                 // Modem Status Register
+
+#define USR 31                // UART Status Register (DesignWare 扩展)
 
 // ====================================================================
-// 软件状态
+// 2. 软件状态
 // ====================================================================
 
-// 发送同步（用于中断驱动的发送）
+// 并发控制
 static struct spinlock uart_tx_lock;
-static int uart_tx_busy;      // UART 是否正在发送
-static int uart_tx_chan;      // 等待通道（地址）
+static struct spinlock uart_rx_lock;
 
-// 用于 panic 时的无锁输出
-extern volatile int panicking;
+// Panic 标志（panic 时跳过锁机制）
+volatile int panicking = 0;
 
-void
-uartinit(void)
+// 接收环形缓冲区
+#define UART_RX_BUF_SIZE 32
+static char uart_rx_buf[UART_RX_BUF_SIZE];
+static uint64 uart_rx_w = 0;  // 写索引 (Producer)
+static uint64 uart_rx_r = 0;  // 读索引 (Consumer)
+
+static struct {
+  struct spinlock lock;
+} pr;
+
+// ====================================================================
+// 3. 初始化
+// ====================================================================
+
+void uartinit(void)
 {
-  // disable interrupts.
-  WriteReg(IER, 0x00);
+    initlock(&uart_tx_lock, "uart_tx");
+    initlock(&uart_rx_lock, "uart_rx");
+    
+    // 1. 关闭所有中断
+    WriteReg(IER, 0x00);
+    
+    // 2. 配置串口参数：8n1 (8 数据位，无校验，1 停止位)
+    WriteReg(LCR, LCR_EIGHT_BITS);
+    
+    // 3. 复位并使能 FIFO
+    WriteReg(FCR, FCR_FIFO_ENABLE | FCR_FIFO_CLEAR);
+    
+    // 4. 使能调制解调器控制信号和中断输出
+    WriteReg(MCR, MCR_OUT2 | MCR_RTS | MCR_DTR);
 
-  // K230 DW8250 不支持设置波特率（固定硬件配置）
-  // 标准 16550a 在这里会设置 LCR_BAUD_LATCH
-
-  // set word length to 8 bits, no parity.
-  WriteReg(LCR, LCR_EIGHT_BITS);
-
-  // reset and enable FIFOs.
-  WriteReg(FCR, FCR_FIFO_ENABLE | FCR_FIFO_CLEAR);
-
-  // enable modem control and interrupt output (K230 specific)
-  WriteReg(MCR, MCR_OUT2 | MCR_RTS | MCR_DTR);
-
-  // enable transmit and receive interrupts.
-  WriteReg(IER, IER_TX_ENABLE | IER_RX_ENABLE);
-
-  initlock(&uart_tx_lock, "uart");
+    // 5. 仅开启接收中断（发送采用轮询方式）
+    WriteReg(IER, IER_RX_ENABLE);
 }
 
-// 中断驱动的批量发送
-// 当 UART 忙时会 sleep 等待，不能在中断中调用
-void
-uartwrite(char buf[], int n)
+// ====================================================================
+// 4. 底层输出（字符级）
+// ====================================================================
+
+// 发送单个字符（自动转换 \n 为 \r\n）
+static void uart_putc(char c)
 {
-  acquire(&uart_tx_lock);
-
-  int i = 0;
-  while(i < n){ 
-    while(uart_tx_busy != 0){
-      // 等待 UART 发送完成中断将 uart_tx_busy 置 0
-      sleep(&uart_tx_chan, &uart_tx_lock);
-    }   
-      
-    WriteReg(THR, buf[i]);
-    i += 1;
-    uart_tx_busy = 1;
-  }
-
-  release(&uart_tx_lock);
+    // Panic 时跳过锁，避免死锁
+    if (panicking == 0) {
+        acquire(&uart_tx_lock);
+    }
+    
+    // 自动插入回车符
+    if (c == '\n') {
+        while ((ReadReg(LSR) & LSR_TX_IDLE) == 0);
+        WriteReg(THR, '\r');
+    }
+    
+    // 等待发送器空闲
+    while ((ReadReg(LSR) & LSR_TX_IDLE) == 0);
+    WriteReg(THR, c);
+    
+    if (panicking == 0) {
+        release(&uart_tx_lock);
+    }
 }
 
-// 同步发送单个字符（用于 printf 和 echo）
-// 轮询方式，可在中断中调用
-void
-uartputc_sync(int c)
+// 发送字符串
+void uart_puts(char *s)
 {
-  if(panicking == 0)
-    push_off();
-
-  // wait for UART to set Transmit Holding Empty in LSR.
-  while((ReadReg(LSR) & LSR_TX_IDLE) == 0)
-    ;
-  WriteReg(THR, c);
-
-  if(panicking == 0)
-    pop_off();
+    while (*s) {
+        uart_putc(*s++);
+    }
 }
 
-// 同步输出字符串（用于早期启动，M-mode）
-// 轮询方式，不依赖锁和中断
-void
-uart_puts(char *s)
-{
-  while(*s){
-    // 等待 UART 空闲
-    while((ReadReg(LSR) & LSR_TX_IDLE) == 0)
-      ;
-    WriteReg(THR, *s);
-    s++;
-  }
-}
+// ====================================================================
+// 5. 底层输入（非阻塞）
+// ====================================================================
 
-// 尝试读取一个字符（非阻塞）
-// 返回 -1 表示没有数据
-int
-uartgetc(void)
+// 非阻塞读取一个字符（内部使用）
+static int uart_getc_nowait(void)
 {
-  if(ReadReg(LSR) & LSR_RX_READY){
-    // input data is ready.
-    return ReadReg(RHR) & 0xFF;
-  } else {
+    if (ReadReg(LSR) & LSR_RX_READY) {
+        return ReadReg(RHR) & 0xFF;
+    }
     return -1;
-  }
 }
 
-// UART 中断处理
-// 处理接收中断和发送完成中断
-void
-uartintr(void)
+// ====================================================================
+// 6. 高层输入（阻塞，供上层调用）
+// ====================================================================
+
+// 阻塞读取一个字符（从缓冲区）
+// TODO: 将来用 sleep/wakeup 替代忙等待
+int uartgetc(void)
 {
-  // K230: 读取 ISR 确认中断（可能包含中断 ID）
-  ReadReg(ISR);
+    while (1) {
+        acquire(&uart_rx_lock);
+        
+        // 检查缓冲区是否有数据
+        if (uart_rx_r != uart_rx_w) {
+            int c = uart_rx_buf[uart_rx_r % UART_RX_BUF_SIZE];
+            uart_rx_r++;
+            release(&uart_rx_lock);
+            return c;
+        }
+        
+        // 缓冲区为空，释放锁后继续轮询
+        release(&uart_rx_lock);
+        
+        // TODO: 将来这里应该用 sleep(&uart_rx_r, &uart_rx_lock);
+        // 现在暂时空转等待
+        for (volatile int i = 0; i < 1000; i++);
+    }
+}
 
-  // 处理发送完成中断
-  acquire(&uart_tx_lock);
-  if(ReadReg(LSR) & LSR_TX_IDLE){
-    // UART finished transmitting; wake up sending thread.
-    uart_tx_busy = 0;
-    wakeup(&uart_tx_chan);
-  }
-  release(&uart_tx_lock);
+// ====================================================================
+// 7. 格式化输出
+// ====================================================================
 
-  // 处理接收中断
-  while(1){
-    int c = uartgetc();
-    if(c == -1)
-      break;
-    consoleintr(c);  // 交给 console 处理（行编辑、回显等）
-  }
+// 打印十六进制数
+static void print_hex(uint64 x, int uppercase)
+{
+    char buf[17];
+    int i = 0;
+    
+    if (x == 0) {
+        uart_putc('0');
+        return;
+    }
+    
+    while (x) {
+        int digit = x & 0xF;
+        buf[i++] = digit < 10 ? '0' + digit : (uppercase ? 'A' : 'a') + digit - 10;
+        x >>= 4;
+    }
+    
+    while (i > 0) {
+        uart_putc(buf[--i]);
+    }
+}
+
+// 打印十进制数
+static void print_dec(int64 x)
+{
+    char buf[20];
+    int i = 0;
+    
+    if (x < 0) {
+        uart_putc('-');
+        x = -x;
+    }
+    
+    if (x == 0) {
+        uart_putc('0');
+        return;
+    }
+    
+    while (x) {
+        buf[i++] = '0' + (x % 10);
+        x /= 10;
+    }
+    
+    while (i > 0) {
+        uart_putc(buf[--i]);
+    }
+}
+
+// 简化版 printf
+// 支持格式：%d %ld %x %X %p %s %c %%
+void printf(const char *fmt, ...)
+{
+    if(panicking == 0)
+        acquire(&pr.lock);
+
+    va_list ap;
+    va_start(ap, fmt);
+    
+    for (const char *p = fmt; *p; p++) {
+        if (*p != '%') {
+            uart_putc(*p);
+            continue;
+        }
+        
+        p++;
+        switch (*p) {
+            case 'd':
+                print_dec(va_arg(ap, int));
+                break;
+            case 'l':
+                if (*(p + 1) == 'd') {
+                    print_dec(va_arg(ap, int64));
+                    p++;
+                }
+                break;
+            case 'x':
+                print_hex(va_arg(ap, uint64), 0);
+                break;
+            case 'X':
+                print_hex(va_arg(ap, uint64), 1);
+                break;
+            case 'p':
+                uart_puts("0x");
+                print_hex((uint64)va_arg(ap, void *), 0);
+                break;
+            case 's': {
+                char *s = va_arg(ap, char *);
+                if (!s) s = "(null)";
+                while (*s) uart_putc(*s++);
+                break;
+            }
+            case 'c':
+                uart_putc((char)va_arg(ap, int));
+                break;
+            case '%':
+                uart_putc('%');
+                break;
+            default:
+                uart_putc('%');
+                uart_putc(*p);
+        }
+    }
+    
+    va_end(ap);
+
+    if(panicking == 0)
+        release(&pr.lock);
+}
+
+// ====================================================================
+// 8. Panic 处理
+// ====================================================================
+
+void panic(const char *s)
+{
+    panicking = 1;
+    printf("\n=== KERNEL PANIC ===\n");
+    printf("panic: %s\n", s);
+    printf("====================\n");
+    
+    // 自动重启系统
+    k230_wdt_reboot();
+
+    while (1);
+}
+
+// ====================================================================
+// 9. 中断处理（Producer）
+// ====================================================================
+
+#define CTRL_X 0x18  // Ctrl+X: 紧急重启
+
+// UART 中断服务例程
+void uartintr(void)
+{
+    while (1) {
+        uint32 iir = ReadReg(ISR);
+        
+        // IIR Bit 0: 0=有中断待处理, 1=无中断
+        if (iir & 1) {
+            // Ghost Interrupt Check: 有时 IIR 显示无中断，但 LSR 显示有数据
+            if (ReadReg(LSR) & LSR_RX_READY) {
+                int c = ReadReg(RHR) & 0xFF;
+                
+                // 紧急按键检查
+                if (c == CTRL_X) {
+                    k230_wdt_reboot();
+                }
+                
+                // 回显
+                uart_putc(c);
+                
+                // 放入缓冲区
+                acquire(&uart_rx_lock);
+                uart_rx_buf[uart_rx_w % UART_RX_BUF_SIZE] = c;
+                uart_rx_w++;
+                // TODO: wakeup(&uart_rx_r);
+                release(&uart_rx_lock);
+                
+                continue;
+            }
+            
+            // 清除 Busy Detect 状态（读取 USR 寄存器）
+            volatile uint32 usr = ReadReg(USR);
+            (void)usr;
+            break;
+        }
+
+        // 解析中断类型
+        int id = iir & 0x0F;
+        
+        // RX Data Available (4) 或 Character Timeout (12)
+        if (id == 4 || id == 12) {
+            int c = uart_getc_nowait();
+            if (c != -1) {
+                // 紧急按键检查
+                if (c == CTRL_X) {
+                    k230_wdt_reboot();
+                }
+                
+                // 回显
+                uart_putc(c);
+                
+                // 放入缓冲区
+                acquire(&uart_rx_lock);
+                uart_rx_buf[uart_rx_w % UART_RX_BUF_SIZE] = c;
+                uart_rx_w++;
+                // TODO: wakeup(&uart_rx_r);
+                release(&uart_rx_lock);
+            }
+        } else {
+            // 其他中断类型：读取状态寄存器以清除
+            volatile uint32 lsr = ReadReg(LSR);
+            volatile uint32 msr = ReadReg(MSR);
+            (void)lsr;
+            (void)msr;
+        }
+    }
+}
+
+void
+printfinit(void)
+{
+  initlock(&pr.lock, "pr");
 }

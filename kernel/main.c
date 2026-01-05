@@ -4,8 +4,7 @@
 void main()
 {
 	if(cpuid() == 0){
-		consoleinit();
-		printfinit();
+		uartinit();
 
 		printf("\n");
 		printf("xv6 kernel is booting\n");
@@ -19,6 +18,11 @@ void main()
 		trap_init();
 		plicinit();
 		plicinithart();
+
+		binit();         // buffer cache
+		iinit();         // inode table
+		fileinit();      // file table
+		
 		userinit();
 
 		printf("hart %d starting\n", cpuid());

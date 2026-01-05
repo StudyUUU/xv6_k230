@@ -90,7 +90,7 @@ void kerneltrap() {
 
 uint64
 usertrap(void)
-{
+{   
     struct proc *p = myproc();
     
     if((r_sstatus() & SSTATUS_SPP) != 0)
@@ -115,7 +115,7 @@ usertrap(void)
 
         // sepc 指向的是 ecall 指令，返回后需要执行下一条指令
         p->trapframe->epc += 4;
-
+        printf("usertrap: syscall from pid %d\n", p->pid);
         // an interrupt will change sepc, scause, and sstatus,
         // so enable only now that we're done with those registers.
         intr_on();

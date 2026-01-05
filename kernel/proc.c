@@ -239,7 +239,7 @@ scheduler(void)
     // 然后再次关闭中断以避免中断和 wfi 之间的竞态条件
     intr_on();
     intr_off();
-
+    
     int found = 0;
     for(p = proc; p < &proc[NPROC]; p++) {
       acquire(&p->lock);

@@ -21,8 +21,6 @@ KOBJS = \
   $K/entry.o \
   $K/start.o \
   $K/uart.o \
-  $K/printf.o \
-  $K/console.o \
   $K/kalloc.o \
   $K/main.o \
   $K/string.o \
