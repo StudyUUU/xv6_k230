@@ -4,7 +4,7 @@
 void main()
 {
 	if(cpuid() == 0){
-		uartinit();
+		consoleinit();
 
 		printf("\n");
 		printf("xv6 kernel is booting\n");

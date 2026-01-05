@@ -158,13 +158,12 @@ void plic_complete(int irq);// 完成一个中断
 // ============================================================================
 // UART 串口驱动 (uart.c)
 // ============================================================================
-void uartinit(void);        // 初始化 UART0
-void printfinit(void);      // 初始化 printf 锁
-void uart_puts(char *s);    // 输出字符串
-void printf(const char *fmt, ...);  // 格式化输出
-void panic(const char *s);  // 内核恐慌（打印错误并停机）
-int uartgetc(void);         // 获取一个字符（非阻塞）
-void uartintr(void);        // UART 中断处理
+void consoleinit(void);
+void printfinit(void);
+void printf(char*, ...);
+void panic(char*) __attribute__((noreturn));
+void consoleintr(int); // 供 trap.c 调用 (如果没有合并 uartintr)
+void uartintr(void);   // 供 trap.c 调用
 
 // exec.c
 int             kexec(char*, char**);
