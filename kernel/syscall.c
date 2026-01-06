@@ -132,11 +132,6 @@ syscall(void)
   if(num > 0 && num < NELEM(syscalls) && syscalls[num]) {
     // Use num to lookup the system call function for num, call it,
     // and store its return value in p->trapframe->a0
-
-    if(num == SYS_exec) {
-        printf("syscall: proc %d (%s) calling exec (num %d)\n", p->pid, p->name, num);
-    }
-
     p->trapframe->a0 = syscalls[num]();
   } else {
     printf("%d %s: unknown sys call %d\n",

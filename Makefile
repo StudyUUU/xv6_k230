@@ -93,8 +93,7 @@ $U/usys.o : $U/usys.S
 # 解决了 "No rule to make target 'user/_init'" 问题
 $U/_%: $U/%.o $(ULIB)
 	$(LD) $(LDFLAGS) -N -e main -Ttext 0 -o $@ $^
-	$(OBJCOPY) -S -O binary $@ $@
-
+	$(OBJCOPY) -S $@ $@ # 可选：用 -S 去掉调试符号减小体积，但绝不能加 -O binary，因为会丢失 ELF 格式
 # 4. 用户态 C 文件编译规则
 $U/%.o: $U/%.c
 	$(CC) $(UCFLAGS) -c -o $@ $<
