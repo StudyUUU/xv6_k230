@@ -451,13 +451,11 @@ kfork(void)
   // a0 寄存器在系统调用返回时存放返回值
   np->trapframe->a0 = 0;
 
-  // 5. 复制文件描述符 (目前暂未实现文件系统，留作占位)
-  /*
+  // 5. 复制文件描述符
   for(int i = 0; i < NOFILE; i++)
     if(p->ofile[i])
       np->ofile[i] = filedup(p->ofile[i]);
   np->cwd = idup(p->cwd);
-  */
 
   // 6. 复制进程名称用于调试
   safestrcpy(np->name, p->name, sizeof(p->name));
@@ -774,8 +772,30 @@ userinit(void)
   p->trapframe->epc = 0;      // 用户程序计数器
   p->trapframe->sp = PGSIZE;  // 用户栈指针
 
-  p->state = RUNNABLE;
+  p->cwd = namei("/");        // 设置根目录
 
+  // 预先打开 console 设备，这样 initcode 可以直接使用 sys_write
+  struct file *f;
+  // fd 0: stdin
+  if((f = filealloc()) != 0) {
+    f->type = FD_DEVICE;
+    f->major = CONSOLE;
+    f->readable = 1;
+    f->writable = 0;
+    p->ofile[0] = f;
+  }
+
+  // fd 1: stdout
+  if((f = filealloc()) != 0) {
+    f->type = FD_DEVICE;
+    f->major = CONSOLE;
+    f->readable = 0;
+    f->writable = 1;
+    p->ofile[1] = f;
+  }
+
+  p->state = RUNNABLE;
+  
   release(&p->lock);
 }
 

@@ -115,13 +115,23 @@ uartwrite(char buf[], int n)
 
   int i = 0;
   while(i < n){
-    // 如果上一轮发送还没结束，睡觉等待 ISR 唤醒
+    // 如果是换行符，先发送 \r
+    if(buf[i] == '\n'){
+      while(uart_tx_busy){
+        sleep(&uart_tx_chan, &uart_tx_lock);
+      }
+      WriteReg(THR, '\r');
+      uart_tx_busy = 1;
+    }
+    
+    // 等待上一轮发送完成
     while(uart_tx_busy){
       sleep(&uart_tx_chan, &uart_tx_lock);
     }
     
+    // 发送当前字符
     WriteReg(THR, buf[i]);
-    uart_tx_busy = 1; // 标记忙，等待中断清除
+    uart_tx_busy = 1;
     i++;
   }
 
