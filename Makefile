@@ -16,7 +16,6 @@ KCFLAGS += -mcmodel=medany -mno-relax
 KCFLAGS += -ffreestanding -fno-common -nostdlib -mno-riscv-attribute
 KCFLAGS += -I.
 
-# 核心对象列表
 KOBJS = \
   $K/entry.o \
   $K/start.o \
@@ -55,21 +54,50 @@ MKFS = mkfs/mkfs
 
 UCFLAGS = -Wall -O -ffreestanding -nostdlib -mno-relax
 UCFLAGS += -march=rv64gc -mabi=lp64
+UCFLAGS += -I.
+
+LDFLAGS = -z max-page-size=4096
 
 INITCODE_O   = $(U)/initcode.o
 INITCODE_ELF = $(U)/initcode
 INITCODE_BIN = $(U)/initcode.bin
 INITCODE_H   = $(K)/initcode.h
 
-# 将来可以在这里添加更多的用户程序，例如 $U/_init $U/_sh 等
-# 目前为了测试，我们把 initcode 这个 ELF 文件也放进文件系统里
-UPROGS = \
-    $U/initcode
+# 用户态基础库对象
+ULIB = $U/ulib.o $U/usys.o $U/printf.o $U/umalloc.o
+
+# 文件系统中的用户程序列表
+UPROGS=\
+    $U/initcode\
+    $U/_init\
+    $U/_sh\
 
 # =========================================================
 # Top-level targets
 # =========================================================
 all: $(INITCODE_H) kernel.bin
+
+# =========================================================
+# User Library & Program Rules (新增重点)
+# =========================================================
+
+# 1. 生成系统调用汇编存根 (依赖 perl 脚本)
+$U/usys.S : $U/usys.pl
+	perl $U/usys.pl > $U/usys.S
+
+# 2. 编译 usys.S
+$U/usys.o : $U/usys.S
+	$(CC) $(UCFLAGS) -c -o $U/usys.o $U/usys.S
+
+# 3. 核心链接规则：将 user/*.c 链接成 user/_* 二进制程序
+# 解决了 "No rule to make target 'user/_init'" 问题
+$U/_%: $U/%.o $(ULIB)
+	$(LD) $(LDFLAGS) -N -e main -Ttext 0 -o $@ $^
+	$(OBJCOPY) -S -O binary $@ $@
+
+# 4. 用户态 C 文件编译规则
+$U/%.o: $U/%.c
+	$(CC) $(UCFLAGS) -c -o $@ $<
 
 # =========================================================
 # initcode build rules
@@ -87,15 +115,12 @@ $(INITCODE_H): $(INITCODE_BIN)
 	xxd -i $< > $@
 
 # =========================================================
-# File System generation rules (New!)
+# File System generation rules
 # =========================================================
 
-# 1. 编译 mkfs 工具 (注意：使用宿主机 gcc，不是 riscv gcc)
 $(MKFS): mkfs/mkfs.c $K/fs.h $K/types.h $K/stat.h $K/param.h
 	gcc -Werror -Wall -I. -o $(MKFS) mkfs/mkfs.c
 
-# 2. 生成 fs.img
-# 依赖于 mkfs 工具和所有用户程序
 fs.img: $(MKFS) $(UPROGS)
 	$(MKFS) fs.img $(UPROGS)
 
@@ -103,23 +128,17 @@ fs.img: $(MKFS) $(UPROGS)
 # kernel build rules
 # =========================================================
 
-# 链接内核
 kernel.bin: $(KOBJS) $(K)/kernel.ld $(INITCODE_H) fs.img
 	$(LD) -T $(K)/kernel.ld -o kernel.elf $(KOBJS)
 	$(OBJCOPY) -O binary kernel.elf kernel.bin
 	cp kernel.bin /home/alientek/linux/tftp/
 
-# 通用编译规则 (.c -> .o)
 $K/%.o: $K/%.c
 	$(CC) $(KCFLAGS) -c $< -o $@
 
-# 通用编译规则 (.S -> .o)
-# 注意：这里会覆盖 ramdisk_img.S 的规则，所以下面必须显式定义它
 $K/%.o: $K/%.S
 	$(CC) $(KCFLAGS) -c $< -o $@
 
-# [关键修复] 显式定义 ramdisk_img.o 的规则
-# 强制要求先生成 fs.img，再编译这个汇编文件
 $K/ramdisk_img.o: $K/ramdisk_img.S fs.img
 	$(CC) $(KCFLAGS) -c $< -o $@
 
@@ -129,6 +148,9 @@ $K/ramdisk_img.o: $K/ramdisk_img.S fs.img
 clean:
 	rm -f \
     $(K)/*.o \
+    $(U)/*.o \
+    $(U)/_*\
+    $(U)/usys.S \
     kernel.elf kernel.bin \
     $(U)/initcode.o \
     $(U)/initcode \

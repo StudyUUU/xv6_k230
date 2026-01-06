@@ -213,7 +213,28 @@ freeproc(struct proc *p)
 // ============================================================================
 //                            调度器和上下文切换
 // ============================================================================
+// Grow or shrink user memory by n bytes.
+// Return 0 on success, -1 on failure.
+int
+growproc(int n)
+{
+  uint64 sz;
+  struct proc *p = myproc();
 
+  sz = p->sz;
+  if(n > 0){
+    if(sz + n > TRAPFRAME) {
+      return -1;
+    }
+    if((sz = uvmalloc(p->pagetable, sz, sz + n, PTE_W)) == 0) {
+      return -1;
+    }
+  } else if(n < 0){
+    sz = uvmdealloc(p->pagetable, sz, sz + n);
+  }
+  p->sz = sz;
+  return 0;
+}
 /*
  * scheduler - 每个 CPU 的调度器主循环
  * 

@@ -95,6 +95,8 @@ int kfork(void);               // 创建子进程
 void kexit(int status);        // 终止当前进程
 int kwait(uint64 addr);        // 等待子进程退出并回收资源
 
+int growproc(int n);               // 增加或减少进程内存大小
+
 // --- 调度器 ---
 void scheduler(void);          // 调度器主循环（永不返回）
 void yield(void);              // 主动让出 CPU

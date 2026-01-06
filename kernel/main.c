@@ -22,6 +22,7 @@ void main()
 		binit();         // buffer cache
 		iinit();         // inode table
 		fileinit();      // file table
+		ramdisk_init();
 		
 		userinit();
 
