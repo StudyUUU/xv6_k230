@@ -1,89 +1,110 @@
-# user/initcode.S
-# 最终验收: GetPID -> Fork -> Wait -> Child(GetPID+Print) -> Parent Print -> Loop
+#include "kernel/syscall.h"
 
-.globl _start
-_start:
-    // ----------------------------------------------------
-    // 1. [Parent] 测试 SYS_getpid
-    // ----------------------------------------------------
-    li a7, 11           // SYS_getpid
-    ecall
-    // 此时 a0 应该等于 1，我们不做处理，主要看内核日志不崩
+# -------------------------------------------------------------------
+# K230 File System Verification (Phase 1)
+# Goal: Open "/README" -> Read -> Write to Console
+# -------------------------------------------------------------------
 
-    // ----------------------------------------------------
-    // 2. [Parent] 打印 Start
-    // ----------------------------------------------------
-    li a0, 1            // fd = 1
-    la a1, msg_start
-    li a2, 7            // len
-    li a7, 16           // SYS_write
-    ecall
-
-    // ----------------------------------------------------
-    // 3. Fork
-    // ----------------------------------------------------
-    li a7, 1            // SYS_fork
+.globl start
+start:
+    # ----------------------------------------------------------
+    # 1. open("/README", O_RDONLY)
+    # ----------------------------------------------------------
+    la a0, file_path    # 参数0: 路径字符串地址
+    li a1, 0            # 参数1: flags (O_RDONLY = 0)
+    li a7, SYS_open     # 系统调用号: 15
     ecall
     
-    // a0==0 是子进程，跳转到 child 标签
-    beqz a0, child
-
-parent:
-    // --- 父进程分支 ---
+    # 检查返回值 (a0 是 fd)
+    # 如果 a0 < 0，跳转到错误处理
+    bltz a0, panic_open
     
-    // 4. [Parent] 调用 wait(0)
-    // 父进程挂起，等待子进程退出
-    li a0, 0
-    li a7, 3            // SYS_wait
+    # 保存 fd 到 s0 寄存器 (callee-saved)
+    mv s0, a0
+
+    # ----------------------------------------------------------
+    # 2. read(fd, buf, 128)
+    # ----------------------------------------------------------
+    mv a0, s0           # 参数0: fd
+    la a1, buf          # 参数1: 缓冲区地址
+    li a2, 128          # 参数2: 读取字节数
+    li a7, SYS_read     # 系统调用号: 5
     ecall
 
-    // 5. [Parent] 醒来后打印 Parent
+    # 检查返回值 (a0 是读取的字节数)
+    # 如果 a0 < 0，跳转到错误处理
+    bltz a0, panic_read
+    
+    # 保存读取字节数到 s1
+    mv s1, a0
+
+    # ----------------------------------------------------------
+    # 3. write(1, buf, count)  -> 打印读取到的内容
+    # ----------------------------------------------------------
+    li a0, 1            # 参数0: stdout (fd 1)
+    la a1, buf          # 参数1: 缓冲区地址
+    mv a2, s1           # 参数2: 刚才读取的长度
+    li a7, SYS_write    # 系统调用号: 16
+    ecall
+
+    # ----------------------------------------------------------
+    # 4. Success Marker (打印一个换行，表示结束)
+    # ----------------------------------------------------------
     li a0, 1
-    la a1, msg_parent
-    li a2, 7            // len
-    li a7, 16           // SYS_write
+    la a1, newline
+    li a2, 1
+    li a7, SYS_write
     ecall
 
-    // 6. [Parent] 死循环 (防止 init 退出导致内核 panic)
-    j loop
-
-child:
-    // --- 子进程分支 ---
-
-    // 7. [Child] 测试 SYS_getpid
-    li a7, 11           // SYS_getpid
+    # ----------------------------------------------------------
+    # 5. exit(0)
+    # ----------------------------------------------------------
+    li a0, 0
+    li a7, SYS_exit
     ecall
-    // 此时 a0 应该等于 2 (或者其他非0非1值)
 
-    // 8. [Child] 打印 Child
+# ----------------------------------------------------------
+# 错误处理分支
+# ----------------------------------------------------------
+panic_open:
     li a0, 1
-    la a1, msg_child
-    li a2, 7            // len
-    li a7, 16           // SYS_write
+    la a1, msg_open_err
+    li a2, 14           # 字符串长度
+    li a7, SYS_write
+    ecall
+    j exit_fail
+
+panic_read:
+    li a0, 1
+    la a1, msg_read_err
+    li a2, 14
+    li a7, SYS_write
+    ecall
+    j exit_fail
+
+exit_fail:
+    li a0, 1
+    li a7, SYS_exit
     ecall
 
-    // 9. [Child] 退出
-    li a0, 0
-    li a7, 2            // SYS_exit
-    ecall
-
-exit:
-    // 理论上不会走到这里，但作为安全出口
-    li a0, 0
-    li a7, 2            // SYS_exit
-    ecall
-
-loop:
-    j loop
-
-// ----------------------------------------------------
-// 数据段
-// ----------------------------------------------------
+# ----------------------------------------------------------
+# 数据段
+# ----------------------------------------------------------
 .data
 .align 4
-msg_start:
-    .string "Start\n\0"
-msg_parent:
-    .string "Parent\n\0"
-msg_child:
-    .string "Child\n\0"
+
+file_path:
+    .string "/README\0"   # 尝试绝对路径
+
+msg_open_err:
+    .string "Open Failed!\n\0"
+
+msg_read_err:
+    .string "Read Failed!\n\0"
+
+newline:
+    .string "\n\0"
+
+# 读取缓冲区 (放在最后)
+buf:
+    .space 128

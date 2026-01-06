@@ -371,7 +371,7 @@ uvminit(pagetable_t pagetable, uchar *src, uint sz)
     panic("uvminit: more than a page");
   mem = kalloc();
   memset(mem, 0, PGSIZE);
-  mappages(pagetable, 0, PGSIZE, (uint64)mem, PTE_R | PTE_X | PTE_U | PTE_A | PTE_THEAD_MAEE);
+  mappages(pagetable, 0, PGSIZE, (uint64)mem, PTE_R | PTE_W | PTE_X | PTE_U | PTE_A | PTE_THEAD_MAEE);
 
   memmove(mem, src, sz);
 }

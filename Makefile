@@ -121,8 +121,8 @@ $(INITCODE_H): $(INITCODE_BIN)
 $(MKFS): mkfs/mkfs.c $K/fs.h $K/types.h $K/stat.h $K/param.h
 	gcc -Werror -Wall -I. -o $(MKFS) mkfs/mkfs.c
 
-fs.img: $(MKFS) $(UPROGS)
-	$(MKFS) fs.img $(UPROGS)
+fs.img: $(MKFS) README $(UPROGS)
+	$(MKFS) fs.img README $(UPROGS)
 
 # =========================================================
 # kernel build rules

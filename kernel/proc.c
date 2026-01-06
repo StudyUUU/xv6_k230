@@ -730,8 +730,23 @@ forkret(void)
   release(&p->lock);
 
   if(first) {
-    first = 0;
     // 此处可添加文件系统初始化等操作
+
+    // File system initialization must be run in the context of a
+    // regular process (e.g., because it calls sleep), and thus cannot
+    // be run from main().
+    fsinit(ROOTDEV);
+    
+    first = 0;
+    // ensure other cores see first=0.
+    __sync_synchronize();
+
+    // // We can invoke kexec() now that file system is initialized.
+    // // Put the return value (argc) of kexec into a0.
+    // p->trapframe->a0 = kexec("/init", (char *[]){ "/init", 0 });
+    // if (p->trapframe->a0 == -1) {
+    //   panic("exec");
+    // }
   }
   
   // 返回到用户空间，模仿 usertrap() 的返回
