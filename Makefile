@@ -71,7 +71,8 @@ UPROGS=\
     $U/_echo\
     $U/_grep\
     $U/_rm\
-    $U/_mkdir
+    $U/_mkdir\
+    $U/_schedtest
 
 # =========================================================
 # Top-level targets

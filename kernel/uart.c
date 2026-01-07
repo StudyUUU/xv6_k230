@@ -300,6 +300,16 @@ consoleintr(int c)
   case C('X'):
     panic("User triggered panic!");
     break;
+  case C('C'):  // Ctrl-C
+    {
+      struct proc *p = myproc();
+      if(p && p->pid > 1) { // 保护 init 进程不被杀
+        setkilled(p);
+        consputc('^');
+        consputc('C');
+      }
+    }
+    break;
   case C('H'): // Backspace
   case '\x7f': // Delete
     if(cons.e != cons.w){

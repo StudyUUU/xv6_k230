@@ -100,8 +100,8 @@ usertrap(void)
 		// --- 1. 系统调用 (Syscall) ---
 		
 		// 【新增】如果进程已被 kill，不要执行系统调用
-		if(p->killed)
-				kexit(-1);
+    if(killed(p))
+      kexit(-1);
 
 		// 跳过 ecall 指令
 		p->trapframe->epc += 4;
@@ -132,12 +132,12 @@ usertrap(void)
 		// 【修改】不要 panic，而是杀死当前进程
 		printf("usertrap(): unexpected scause 0x%lx pid=%d\n", scause, p->pid);
 		printf("            sepc=0x%lx stval=0x%lx\n", r_sepc(), r_stval());
-		p->killed = 1;
+		setkilled(p);
 	}
 
 	// 【新增】如果进程已被 kill，退出
-	if(p->killed)
-		kexit(-1);
+  if(killed(p))
+    kexit(-1);
 
 	// 【新增】如果是时钟中断，让出 CPU (抢占)
 	if(which_dev == 2)
