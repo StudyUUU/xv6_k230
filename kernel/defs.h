@@ -139,6 +139,8 @@ int holdingsleep(struct sleeplock *lk);
 // ============================================================================
 // 陷阱和中断处理 (trap.c)
 // ============================================================================
+extern uint     ticks;
+extern struct spinlock tickslock;
 void trap_init(void);       // 初始化陷阱处理（设置 stvec）
 uint64 usertrap(void);      // 用户态陷阱处理入口
 int devintr(void);          // 设备中断分发

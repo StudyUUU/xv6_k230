@@ -7,6 +7,7 @@
 #include "defs.h"
 
 struct spinlock tickslock;
+uint ticks;
 
 extern void kernelvec();
 
@@ -37,6 +38,15 @@ void kerneltrap() {
 			
 			// --- 1. 时钟中断 (Timer) ---
 			if(which_int == 5) { 
+				if(cpuid() == 0){
+					acquire(&tickslock);
+					ticks++;
+					wakeup(&ticks);
+					release(&tickslock);
+				}
+				// ask for the next timer interrupt. this also clears
+				// the interrupt request. 1000000 is about a tenth
+				// of a second.
 				set_timer(r_time() + CLOCK_INTERVAL);
 				which_dev = 2; // 标记为时钟中断
 			} 

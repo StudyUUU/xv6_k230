@@ -25,14 +25,54 @@ read:
  li a7, SYS_read
  ecall
  ret
+.global write
+write:
+ li a7, SYS_write
+ ecall
+ ret
+.global close
+close:
+ li a7, SYS_close
+ ecall
+ ret
+.global kill
+kill:
+ li a7, SYS_kill
+ ecall
+ ret
 .global exec
 exec:
  li a7, SYS_exec
  ecall
  ret
+.global open
+open:
+ li a7, SYS_open
+ ecall
+ ret
+.global mknod
+mknod:
+ li a7, SYS_mknod
+ ecall
+ ret
+.global unlink
+unlink:
+ li a7, SYS_unlink
+ ecall
+ ret
 .global fstat
 fstat:
  li a7, SYS_fstat
+ ecall
+ ret
+.global link
+link:
+ li a7, SYS_link
+ ecall
+ ret
+.global mkdir
+mkdir:
+ li a7, SYS_mkdir
  ecall
  ret
 .global chdir
@@ -55,38 +95,13 @@ sys_sbrk:
  li a7, SYS_sbrk
  ecall
  ret
-.global open
-open:
- li a7, SYS_open
+.global pause
+pause:
+ li a7, SYS_pause
  ecall
  ret
-.global write
-write:
- li a7, SYS_write
- ecall
- ret
-.global mknod
-mknod:
- li a7, SYS_mknod
- ecall
- ret
-.global unlink
-unlink:
- li a7, SYS_unlink
- ecall
- ret
-.global link
-link:
- li a7, SYS_link
- ecall
- ret
-.global mkdir
-mkdir:
- li a7, SYS_mkdir
- ecall
- ret
-.global close
-close:
- li a7, SYS_close
+.global uptime
+uptime:
+ li a7, SYS_uptime
  ecall
  ret
