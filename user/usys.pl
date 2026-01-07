@@ -10,27 +10,32 @@ sub entry {
     my $prefix = "sys_";
     my $name = shift;
     if ($name eq "sbrk") {
-	print ".global $prefix$name\n";
-	print "$prefix$name:\n";
+    print ".global $prefix$name\n";
+    print "$prefix$name:\n";
     } else {
-	print ".global $name\n";
-	print "$name:\n";
+    print ".global $name\n";
+    print "$name:\n";
     }
     print " li a7, SYS_${name}\n";
     print " ecall\n";
     print " ret\n";
 }
-	
-entry("fork");    # 创建进程
-entry("exit");    # 退出进程
-entry("wait");    # 回收进程
-entry("read");    # 读取输入 (键盘/文件)
-entry("write");   # 输出内容 (屏幕/文件)
-entry("close");   # 关闭文件描述符
-entry("exec");    # 加载并运行 sh
-entry("open");    # 打开 console 或文件
-entry("mknod");   # 创建 console 设备节点
-entry("dup");     # 重定向文件描述符 (stdin/out/err)
-entry("getpid");  # 获取进程ID (sh常用)
+    
+entry("fork");
+entry("exit");
+entry("wait");
+entry("pipe");
+entry("read");
+entry("exec");
 entry("fstat");
-entry("sbrk");    # 分配内存
+entry("chdir");
+entry("dup");
+entry("getpid");
+entry("sbrk");
+entry("open");
+entry("write");
+entry("mknod");
+entry("unlink");
+entry("link");
+entry("mkdir");
+entry("close");
