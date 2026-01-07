@@ -27,36 +27,101 @@ char buf[BUFSZ];
 // fair amount of time.
 //
 
-// what if you pass ridiculous pointers to system calls
-// that read user memory with copyin?
+// 确保包含必要的头文件，如果你的环境无法在用户态引用 kernel/memlayout.h，
+// 请使用下面的硬编码值
+#include "kernel/param.h"
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "user/user.h"
+#include "kernel/fs.h"
+#include "kernel/fcntl.h"
+#include "kernel/syscall.h"
+#include "kernel/memlayout.h" // 确保这里能读到 K230 的定义
+#include "kernel/riscv.h"
+
 void
 copyin(char *s)
 {
-  uint64 addrs[] = { 0x80000000LL, 0x3fffffe000, 0x3ffffff000, 0x4000000000,
-                     0xffffffffffffffff };
+  // 根据 K230 memlayout.h 定义构造的测试地址表
+  uint64 addrs[] = { 
+    // ===========================================
+    // 1. 低端物理地址 (Identity Mapping 区域测试)
+    // ===========================================
+    
+    // [K230 KERNBASE] 0x00200000
+    // 原理：这是内核代码段起始位置。
+    // 测试：除非用户进程非常大(>2MB)，否则该VA未映射。
+    //       即使映射了，也不应该指向物理地址 0x00200000 (除非你允许用户直接映射物理内存)。
+    0x00200000LL, 
+
+    // [K230 UART0] 0x91400000
+    // 原理：外设 MMIO 区域。
+    // 测试：用户页表绝对不应该包含这个地址，否则用户可以直接劫持串口输出。
+    0x91400000LL, 
+
+    // [K230 PLIC] 0x0f00000000
+    // 原理：中断控制器，位于 36位 物理地址。
+    // 测试：Sv39 虚拟地址可以覆盖此范围，但用户态绝不允许访问。
+    0x0f00000000LL,
+
+    // ===========================================
+    // 2. 高端虚拟地址 (内核核心结构测试)
+    // ===========================================
+    // Sv39 MAXVA = 1L << 38 = 0x4000000000
+    
+    // [TRAPFRAME] 0x3fffffe000 (MAXVA - 2*PGSIZE)
+    // 原理：保存着寄存器上下文。虽然映射在用户空间，但 PTE_U 必须为 0。
+    // 测试：用户是否有权限读取内核保存的寄存器。
+    0x3fffffe000LL, 
+
+    // [TRAMPOLINE] 0x3ffffff000 (MAXVA - PGSIZE)
+    // 原理：进出内核的代码。
+    // 测试：同上，检查 PTE_U 权限位。
+    0x3ffffff000LL, 
+
+    // ===========================================
+    // 3. 边界与非法地址测试
+    // ===========================================
+    
+    // [MAXVA Boundary] 0x4000000000
+    // 原理：Sv39 地址空间上限。
+    // 测试：内核是否正确检查了 srcva < MAXVA。
+    0x4000000000LL, 
+
+    // [Invalid] -1
+    // 测试：明显的非法指针。
+    0xffffffffffffffff 
+  };
+
+  printf("tests: copyin protection (K230 layout)... ");
 
   for(int ai = 0; ai < sizeof(addrs)/sizeof(addrs[0]); ai++){
     uint64 addr = addrs[ai];
     
+    // --- 场景 1: write() 到文件 ---
     int fd = open("copyin1", O_CREATE|O_WRONLY);
     if(fd < 0){
       printf("open(copyin1) failed\n");
       exit(1);
     }
+    // 关键点：我们让内核从 'addr' 读取数据写入文件
     int n = write(fd, (void*)addr, 8192);
     if(n >= 0){
-      printf("write(fd, %p, 8192) returned %d, not -1\n", (void*)addr, n);
+      printf("\nFAILED: write(fd, %p, 8192) returned %d, expected -1\n", (void*)addr, n);
+      printf("  --> Security Breach: Kernel allowed access to protected address %p\n", (void*)addr);
       exit(1);
     }
     close(fd);
     unlink("copyin1");
     
+    // --- 场景 2: write() 到控制台 ---
     n = write(1, (char*)addr, 8192);
     if(n > 0){
-      printf("write(1, %p, 8192) returned %d, not -1 or 0\n", (void*)addr, n);
+      printf("\nFAILED: write(1, %p, 8192) returned %d, expected -1\n", (void*)addr, n);
       exit(1);
     }
     
+    // --- 场景 3: write() 到管道 ---
     int fds[2];
     if(pipe(fds) < 0){
       printf("pipe() failed\n");
@@ -64,12 +129,14 @@ copyin(char *s)
     }
     n = write(fds[1], (char*)addr, 8192);
     if(n > 0){
-      printf("write(pipe, %p, 8192) returned %d, not -1 or 0\n", (void*)addr, n);
+      printf("\nFAILED: write(pipe, %p, 8192) returned %d, expected -1\n", (void*)addr, n);
       exit(1);
     }
     close(fds[0]);
     close(fds[1]);
   }
+  
+  printf("OK\n");
 }
 
 // what if you pass ridiculous pointers to system calls
