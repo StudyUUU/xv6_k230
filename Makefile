@@ -5,6 +5,7 @@ TOOLPREFIX = riscv64-unknown-elf-
 CC      = $(TOOLPREFIX)gcc
 LD      = $(TOOLPREFIX)ld
 OBJCOPY = $(TOOLPREFIX)objcopy
+OBJDUMP = $(TOOLPREFIX)objdump
 
 # =========================================================
 # Kernel build config
@@ -58,60 +59,56 @@ UCFLAGS += -I.
 
 LDFLAGS = -z max-page-size=4096
 
-INITCODE_O   = $(U)/initcode.o
-INITCODE_ELF = $(U)/initcode
-INITCODE_BIN = $(U)/initcode.bin
-INITCODE_H   = $(K)/initcode.h
+# --- 【备份区】Initcode 相关定义 (已注释) ---
+# INITCODE_O   = $(U)/initcode.o
+# INITCODE_ELF = $(U)/initcode
+# INITCODE_BIN = $(U)/initcode.bin
+# INITCODE_H   = $(K)/initcode.h
 
 # 用户态基础库对象
 ULIB = $U/ulib.o $U/usys.o $U/printf.o $U/umalloc.o
 
-# 文件系统中的用户程序列表
+# 文件系统中的用户程序列表 (增加了 ls, cat, echo 等常用工具)
 UPROGS=\
-    $U/initcode\
     $U/_init\
     $U/_sh\
+
 
 # =========================================================
 # Top-level targets
 # =========================================================
-all: $(INITCODE_H) kernel.bin
+# 修改：不再依赖 $(INITCODE_H)
+all: kernel.bin
 
 # =========================================================
-# User Library & Program Rules (新增重点)
+# User Library & Program Rules
 # =========================================================
 
-# 1. 生成系统调用汇编存根 (依赖 perl 脚本)
+# 1. 生成系统调用汇编存根
 $U/usys.S : $U/usys.pl
 	perl $U/usys.pl > $U/usys.S
 
-# 2. 编译 usys.S
 $U/usys.o : $U/usys.S
 	$(CC) $(UCFLAGS) -c -o $U/usys.o $U/usys.S
 
-# 3. 核心链接规则：将 user/*.c 链接成 user/_* 二进制程序
-# 解决了 "No rule to make target 'user/_init'" 问题
+# 2. 核心链接规则：保持 ELF 格式
+# 删除了 -O binary，增加了 OBJDUMP 方便以后查汇编代码
 $U/_%: $U/%.o $(ULIB)
 	$(LD) $(LDFLAGS) -N -e main -Ttext 0 -o $@ $^
-	$(OBJCOPY) -S $@ $@ # 可选：用 -S 去掉调试符号减小体积，但绝不能加 -O binary，因为会丢失 ELF 格式
-# 4. 用户态 C 文件编译规则
+	$(OBJDUMP) -S $@ > $U/$*.asm
+
 $U/%.o: $U/%.c
 	$(CC) $(UCFLAGS) -c -o $@ $<
 
-# =========================================================
-# initcode build rules
-# =========================================================
-$(INITCODE_O): $(U)/initcode.S
-	$(CC) $(UCFLAGS) -c $< -o $@
-
-$(INITCODE_ELF): $(INITCODE_O)
-	$(LD) -N -Ttext 0 -o $@ $<
-
-$(INITCODE_BIN): $(INITCODE_ELF)
-	$(OBJCOPY) -O binary $< $@
-
-$(INITCODE_H): $(INITCODE_BIN)
-	xxd -i $< > $@
+# --- 【备份区】initcode 编译规则 (已注释) ---
+# $(INITCODE_O): $(U)/initcode.S
+# 	$(CC) $(UCFLAGS) -c $< -o $@
+# $(INITCODE_ELF): $(INITCODE_O)
+# 	$(LD) -N -Ttext 0 -o $@ $<
+# $(INITCODE_BIN): $(INITCODE_ELF)
+# 	$(OBJCOPY) -O binary $< $@
+# $(INITCODE_H): $(INITCODE_BIN)
+# 	xxd -i $< > $@
 
 # =========================================================
 # File System generation rules
@@ -120,6 +117,7 @@ $(INITCODE_H): $(INITCODE_BIN)
 $(MKFS): mkfs/mkfs.c $K/fs.h $K/types.h $K/stat.h $K/param.h
 	gcc -Werror -Wall -I. -o $(MKFS) mkfs/mkfs.c
 
+# 确保 README 存在，并将所有 UPROGS 打包
 fs.img: $(MKFS) README $(UPROGS)
 	$(MKFS) fs.img README $(UPROGS)
 
@@ -127,7 +125,8 @@ fs.img: $(MKFS) README $(UPROGS)
 # kernel build rules
 # =========================================================
 
-kernel.bin: $(KOBJS) $(K)/kernel.ld $(INITCODE_H) fs.img
+# 修改：去掉了对 $(INITCODE_H) 的物理依赖
+kernel.bin: $(KOBJS) $(K)/kernel.ld fs.img
 	$(LD) -T $(K)/kernel.ld -o kernel.elf $(KOBJS)
 	$(OBJCOPY) -O binary kernel.elf kernel.bin
 	cp kernel.bin /home/alientek/linux/tftp/
@@ -146,14 +145,6 @@ $K/ramdisk_img.o: $K/ramdisk_img.S fs.img
 # =========================================================
 clean:
 	rm -f \
-    $(K)/*.o \
-    $(U)/*.o \
-    $(U)/_*\
-    $(U)/usys.S \
-    kernel.elf kernel.bin \
-    $(U)/initcode.o \
-    $(U)/initcode \
-    $(U)/initcode.bin \
-    $(INITCODE_H) \
-    $(MKFS) \
-    fs.img
+	$K/*.o $U/*.o $U/_* $U/*.asm $U/usys.S \
+	kernel.elf kernel.bin fs.img $(MKFS) \
+	$(U)/initcode.o $(U)/initcode $(U)/initcode.bin

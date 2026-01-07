@@ -5,7 +5,7 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
-#include "initcode.h"
+// #include "initcode.h"
 
 /*
  * xv6-k230 进程管理
@@ -741,12 +741,12 @@ forkret(void)
     // ensure other cores see first=0.
     __sync_synchronize();
 
-    // // We can invoke kexec() now that file system is initialized.
-    // // Put the return value (argc) of kexec into a0.
-    // p->trapframe->a0 = kexec("/init", (char *[]){ "/init", 0 });
-    // if (p->trapframe->a0 == -1) {
-    //   panic("exec");
-    // }
+    // We can invoke kexec() now that file system is initialized.
+    // Put the return value (argc) of kexec into a0.
+    p->trapframe->a0 = kexec("/init", (char *[]){ "/init", 0 });
+    if (p->trapframe->a0 == -1) {
+      panic("exec");
+    }
   }
   
   // 返回到用户空间，模仿 usertrap() 的返回
@@ -777,40 +777,28 @@ userinit(void)
 
   p = allocproc();
   initproc = p;
-  safestrcpy(p->name, "user_initcode_bin", sizeof(p->name));  
   
-  // 分配用户代码页，并进行映射
-  uvminit(p->pagetable, user_initcode_bin, user_initcode_bin_len);
-  p->sz = PGSIZE;
+  // 1. 设置进程名
+  safestrcpy(p->name, "init", sizeof(p->name)); 
 
-  // 为从内核到用户的第一次"返回"做准备
-  p->trapframe->epc = 0;      // 用户程序计数器
-  p->trapframe->sp = PGSIZE;  // 用户栈指针
+  // 2. 设置工作目录 (必须！)
+  p->cwd = namei("/"); 
 
-  p->cwd = namei("/");        // 设置根目录
+  // 3. 这里的内存分配 (uvminit) 可以删掉了
+  // 因为 kexec 会负责分配新的内存页表并加载 ELF。
+  // allocproc 已经为我们分配了一个空的页表 (包含 trampoline 和 trapframe 映射)，这就足够了。
+  p->sz = 0; 
 
-  // 预先打开 console 设备，这样 initcode 可以直接使用 sys_write
-  struct file *f;
-  // fd 0: stdin
-  if((f = filealloc()) != 0) {
-    f->type = FD_DEVICE;
-    f->major = CONSOLE;
-    f->readable = 1;
-    f->writable = 0;
-    p->ofile[0] = f;
-  }
+  // 4. Trapframe 设置也可以简化
+  // kexec 会重置 epc (入口点) 和 sp (栈指针)
+  // 所以这里不需要设 epc 和 sp
+  
+  // 5. 不要在这里打开文件描述符 (FD)
+  // 让 /init 程序自己去 open("console")，这样符合 UNIX 标准行为。
 
-  // fd 1: stdout
-  if((f = filealloc()) != 0) {
-    f->type = FD_DEVICE;
-    f->major = CONSOLE;
-    f->readable = 0;
-    f->writable = 1;
-    p->ofile[1] = f;
-  }
-
+  // 6. 就绪
   p->state = RUNNABLE;
-  
+
   release(&p->lock);
 }
 
