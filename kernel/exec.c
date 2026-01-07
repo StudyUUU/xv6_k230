@@ -65,8 +65,9 @@ kexec(char *path, char **argv)
       goto bad;
     if(ph.vaddr + ph.memsz < ph.vaddr)
       goto bad;
-    if(ph.vaddr % PGSIZE != 0)
-      goto bad;
+    // 原版 xv6 只能处理对齐的段，现在我们要支持更通用的 ELF
+    // if(ph.vaddr % PGSIZE != 0)
+    //   goto bad;
     uint64 sz1;
     if((sz1 = uvmalloc(pagetable, sz, ph.vaddr + ph.memsz, flags2perm(ph.flags))) == 0)
       goto bad;
@@ -148,7 +149,7 @@ kexec(char *path, char **argv)
 }
 
 // Load an ELF program segment into pagetable at virtual address va.
-// va must be page-aligned
+// va need not be page-aligned. (修改点：不再强制要求页对齐)
 // and the pages from va to va+sz must already be mapped.
 // Returns 0 on success, -1 on failure.
 static int
@@ -157,15 +158,29 @@ loadseg(pagetable_t pagetable, uint64 va, struct inode *ip, uint offset, uint sz
   uint i, n;
   uint64 pa;
 
-  for(i = 0; i < sz; i += PGSIZE){
+  // 修改点1：循环步长改为 n (实际读取字节数)，而不是固定的 PGSIZE
+  for(i = 0; i < sz; i += n){
+    
+    // 获取当前虚拟地址所在的物理页基址
     pa = walkaddr(pagetable, va + i);
     if(pa == 0)
       panic("loadseg: address should exist");
-    if(sz - i < PGSIZE)
+
+    // 修改点2：计算当前虚拟地址在页内的偏移量
+    // 如果 va+i = 0x1010，PGSIZE=0x1000，则 off_in_page = 0x10 (16)
+    uint64 off_in_page = (va + i) % PGSIZE;
+
+    // 修改点3：计算本轮应该读取多少字节
+    // 情况 A: 剩余数据量 (sz-i) 很小，填不满这一页剩余的空间
+    // 情况 B: 剩余数据量很大，只能填到当前页的末尾 (PGSIZE - off_in_page)
+    if(sz - i < PGSIZE - off_in_page)
       n = sz - i;
     else
-      n = PGSIZE;
-    if(readi(ip, 0, (uint64)pa, offset+i, n) != n)
+      n = PGSIZE - off_in_page;
+
+    // 修改点4：写入物理地址时，加上页内偏移
+    // 目标地址 = 物理页基址 (pa) + 页内偏移 (off_in_page)
+    if(readi(ip, 0, (uint64)pa + off_in_page, offset + i, n) != n)
       return -1;
   }
   

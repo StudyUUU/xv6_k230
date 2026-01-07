@@ -135,33 +135,100 @@ copyin(char *s)
     close(fds[0]);
     close(fds[1]);
   }
-  
-  printf("OK\n");
 }
 
-// what if you pass ridiculous pointers to system calls
-// that write user memory with copyout?
 void
 copyout(char *s)
 {
-  uint64 addrs[] = { 0LL, 0x80000000LL, 0x3fffffe000, 0x3ffffff000, 0x4000000000,
-                     0xffffffffffffffff };
+  // 针对 K230 平台构造的“禁飞区”地址列表
+  uint64 addrs[] = { 
+    // ===========================================
+    // 1. 代码段写保护测试 (W^X Protection)
+    // ===========================================
+    // [User Text Segment] 0x0
+    // 原理：xv6 用户程序代码通常加载在 0 地址。
+    // 测试：代码段应该是只读的 (PTE_R | PTE_X, 无 PTE_W)。
+    //       如果 copyout 成功写入这里，说明你的 exec 实现没有去掉代码页的写权限，
+    //       或者 copyout 忽略了写权限检查。
+    0LL, 
+
+    // ===========================================
+    // 2. 物理内存与内核核心保护 (Physical RAM)
+    // ===========================================
+    
+    // [K230 KERNBASE] 0x00200000
+    // 原理：这是内核物理加载地址。
+    // 测试：防止用户利用 read() 覆盖正在运行的内核指令。
+    0x00200000LL, 
+
+    // ===========================================
+    // 3. 硬件寄存器保护 (MMIO Protection)
+    // ===========================================
+    
+    // [K230 UART0] 0x91400000
+    // 原理：串口控制寄存器。
+    // 测试：防止用户通过 read() 修改波特率或关闭串口中断，导致系统失联。
+    0x91400000LL, 
+
+    // [K230 PLIC] 0x0f00000000
+    // 原理：中断控制器。
+    // 测试：防止用户屏蔽或伪造中断。
+    0x0f00000000LL,
+
+    // ===========================================
+    // 4. 内核高位映射保护 (Kernel Structures)
+    // ===========================================
+    
+    // [TRAPFRAME] 0x3fffffe000
+    // 原理：保存用户寄存器的页。虽然属于当前进程，但只能由内核在 trap 时写入。
+    // 测试：用户态不应有直接写入权 (PTE_W 应为 0)。
+    0x3fffffe000LL, 
+
+    // [TRAMPOLINE] 0x3ffffff000
+    // 原理：内核跳板代码。
+    // 测试：绝对只读，严禁覆写。
+    0x3ffffff000LL, 
+
+    // ===========================================
+    // 5. 边界测试
+    // ===========================================
+    
+    // [MAXVA] 0x4000000000
+    // 测试：地址越界检查。
+    0x4000000000LL, 
+
+    // [Invalid]
+    0xffffffffffffffff 
+  };
+
+  printf("tests: copyout protection (K230 layout)... ");
 
   for(int ai = 0; ai < sizeof(addrs)/sizeof(addrs[0]); ai++){
     uint64 addr = addrs[ai];
 
+    // --- 场景 1: read() from file ---
+    // 语义：请把 "README" 文件的内容，写入到地址 'addr' 去
     int fd = open("README", 0);
     if(fd < 0){
       printf("open(README) failed\n");
       exit(1);
     }
+    
     int n = read(fd, (void*)addr, 8192);
     if(n > 0){
-      printf("read(fd, %p, 8192) returned %d, not -1 or 0\n", (void*)addr, n);
+      printf("\nFAILED: read(fd, %p, 8192) returned %d, expected error\n", (void*)addr, n);
+      printf("  --> Security Breach: Kernel allowed OVERWRITE of protected address %p\n", (void*)addr);
+      
+      // 特别提示：如果是地址 0 失败
+      if(addr == 0) {
+          printf("  --> Hint: Check your exec() implementation. User text segment should not be Writable (PTE_W should be 0).\n");
+      }
       exit(1);
     }
     close(fd);
 
+    // --- 场景 2: read() from pipe ---
+    // 语义：请把管道里的数据，写入到地址 'addr' 去
     int fds[2];
     if(pipe(fds) < 0){
       printf("pipe() failed\n");
@@ -172,9 +239,11 @@ copyout(char *s)
       printf("pipe write failed\n");
       exit(1);
     }
+    
+    // 尝试从管道读出数据并写入目标地址
     n = read(fds[0], (void*)addr, 8192);
     if(n > 0){
-      printf("read(pipe, %p, 8192) returned %d, not -1 or 0\n", (void*)addr, n);
+      printf("\nFAILED: read(pipe, %p, 8192) returned %d, expected error\n", (void*)addr, n);
       exit(1);
     }
     close(fds[0]);
@@ -186,15 +255,40 @@ copyout(char *s)
 void
 copyinstr1(char *s)
 {
-  uint64 addrs[] = { 0x80000000LL, 0x3fffffe000, 0x3ffffff000, 0x4000000000,
-                     0xffffffffffffffff };
+  // 适配 K230 内存布局
+  uint64 addrs[] = { 
+    // [K230 Phys Base] 0x00200000 
+    // 测试：用户给了一个指针，指向物理内存的内核基址。
+    // copyinstr 应该在查表时失败。
+    0x00200000LL, 
+
+    // [K230 UART0] 0x91400000
+    // 测试：用户给了一个指针，指向串口寄存器。
+    // copyinstr 绝对不能去读硬件寄存器当文件名。
+    0x91400000LL, 
+
+    // [Trapframe]
+    0x3fffffe000, 
+
+    // [Trampoline]
+    0x3ffffff000, 
+
+    // [MAXVA]
+    0x4000000000, 
+
+    // [Invalid]
+    0xffffffffffffffff 
+  };
+
+  printf("tests: copyinstr protection (K230 layout)... ");
 
   for(int ai = 0; ai < sizeof(addrs)/sizeof(addrs[0]); ai++){
     uint64 addr = addrs[ai];
 
     int fd = open((char *)addr, O_CREATE|O_WRONLY);
     if(fd >= 0){
-      printf("open(%p) returned %d, not -1\n", (void*)addr, fd);
+      printf("\nFAILED: open(%p) returned %d, expected -1\n", (void*)addr, fd);
+      printf("  --> Kernel accepted an illegal string pointer!\n");
       exit(1);
     }
   }

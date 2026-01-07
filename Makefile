@@ -57,7 +57,7 @@ UCFLAGS = -Wall -O -ffreestanding -nostdlib -mno-relax
 UCFLAGS += -march=rv64gc -mabi=lp64
 UCFLAGS += -I.
 
-LDFLAGS = -z max-page-size=4096
+LDFLAGS += -z max-page-size=4096
 
 # 用户态基础库对象
 ULIB = $U/ulib.o $U/usys.o $U/printf.o $U/umalloc.o
@@ -93,7 +93,8 @@ $U/usys.o : $U/usys.S
 
 # 核心链接规则：保持为 ELF 格式
 $U/_%: $U/%.o $(ULIB)
-	$(LD) $(LDFLAGS) -N -e main -Ttext 0 -o $@ $^
+	# 链接为 ELF 可执行文件，但是不能设置为可写，对于代码段应该是只读+执行的
+	$(LD) $(LDFLAGS) -e main -Ttext 0 -o $@ $^
 	$(OBJDUMP) -S $@ > $U/$*.asm
 
 $U/%.o: $U/%.c
