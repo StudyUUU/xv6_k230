@@ -441,6 +441,15 @@ kfork(void)
     release(&np->lock);
     return -1;
   }
+  
+// ====================================================
+  // [K230/RISC-V 修复] 刷新 I-Cache
+  // fork 刚刚通过 uvmcopy (memmove) 写入了新进程的代码段。
+  // 这些数据现在可能只存在于 D-Cache 中。
+  // 我们必须执行 fence.i，确保 CPU 从 I-Cache 取指时能看到最新的代码。
+  // ====================================================
+  asm volatile("fence.i");
+
   np->sz = p->sz;
 
   // 3. 复制父进程的寄存器状态 (Trapframe)

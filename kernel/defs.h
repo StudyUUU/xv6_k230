@@ -68,7 +68,7 @@ void uvmfree(pagetable_t pagetable, uint64 sz);
 int uvmcopy(pagetable_t old, pagetable_t new, uint64 sz);
 uint64 walkaddr(pagetable_t pagetable, uint64 va);
 void uvmclear(pagetable_t pagetable, uint64 va);
-
+uint64 vmfault(pagetable_t, uint64, int);
 // --- 内核/用户空间数据复制 ---
 int copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len);
 int copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len);

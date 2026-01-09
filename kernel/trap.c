@@ -138,10 +138,13 @@ usertrap(void)
 		which_dev = 1;
 	} 
 	else {
+		if(r_scause() == 15 || r_scause() == 13){
+			vmfault(p->pagetable, r_stval(), (r_scause() == 13) ? 1 : 0);
+		}
 		// --- 4. 用户态异常 (User Exception) ---
 		// 【修改】不要 panic，而是杀死当前进程
-		printf("usertrap(): unexpected scause 0x%lx pid=%d\n", scause, p->pid);
-		printf("            sepc=0x%lx stval=0x%lx\n", r_sepc(), r_stval());
+		printf("usertrap(): unexpected scause 0x%p pid=%d\n", scause, p->pid);
+		printf("            sepc=0x%p stval=0x%p\n", r_sepc(), r_stval());
 		setkilled(p);
 	}
 
