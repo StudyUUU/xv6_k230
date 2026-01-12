@@ -511,16 +511,16 @@ reparent(struct proc *p)
 /*
  * kexit - 终止当前进程
  * @status: 退出状态码
- * 
  * 步骤：
  * 1. 检查是否为 init 进程（不允许退出）
- * 2. 将子进程重新分配给 init
- * 3. 唤醒父进程（可能在 wait 中等待）
- * 4. 设置状态为 ZOMBIE
- * 5. 调用 sched() 切换到调度器，永不返回
+ * 2. 关闭所有打开的文件（触发 pipeclose/iput，解决管道卡死）
+ * 3. 释放当前工作目录的引用（iput p->cwd）
+ * 4. 将子进程重新分配给 init
+ * 5. 唤醒父进程（可能在 wait 中等待）
+ * 6. 设置状态为 ZOMBIE
+ * 7. 调用 sched() 切换到调度器，永不返回
  * 
- * 注意：进程资源在父进程调用 wait() 时才会被释放
- */
+ * 注意：内核栈与 proc 结构体等基础资源在父进程调用 wait() 时才会被释放 */
 void
 kexit(int status)
 {
@@ -529,6 +529,20 @@ kexit(int status)
   if(p == initproc)
     panic("init exiting");
 
+  // 关闭所有打开的文件描述符
+  for(int fd = 0; fd < NOFILE; fd++){
+    if(p->ofile[fd]){
+      struct file *f = p->ofile[fd];
+      fileclose(f);
+      p->ofile[fd] = 0;
+    }
+  }
+
+  begin_op();
+  iput(p->cwd);
+  end_op();
+  p->cwd = 0;
+
   acquire(&wait_lock);
 
   // 将所有子进程交给 init 进程
@@ -536,7 +550,7 @@ kexit(int status)
 
   // 唤醒父进程（可能在 wait() 中睡眠）
   wakeup(p->parent);
-
+  
   acquire(&p->lock);
 
   p->xstate = status;
