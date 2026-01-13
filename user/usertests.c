@@ -2596,8 +2596,15 @@ nowrite(char *s)
 {
   int pid;
   int xstatus;
-  uint64 addrs[] = { 0, 0x80000000LL, 0x3fffffe000, 0x3ffffff000, 0x4000000000,
-                     0xffffffffffffffff };
+
+  uint64 addrs[] = { 
+        0, 
+        0x00200000LL,    // <--- K230 真实的 KERNBASE
+        0x3fffffe000, 
+        0x3ffffff000, 
+        0x4000000000,
+        0xffffffffffffffff 
+    };
   
   for(int ai = 0; ai < sizeof(addrs)/sizeof(addrs[0]); ai++){
     pid = fork();
