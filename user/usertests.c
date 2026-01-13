@@ -2329,7 +2329,7 @@ MAXVAplus(char *s)
 void
 sbrkfail(char *s)
 {
-  enum { BIG=100*1024*1024 };
+  enum { BIG=200*1024*1024 }; // 由于可用内存空间太多，如果按照1GB来测试，可能无法触发分配失败的情况
   int i, xstatus;
   int fds[2];
   char scratch;
