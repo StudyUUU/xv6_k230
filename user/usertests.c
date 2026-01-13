@@ -3389,6 +3389,8 @@ drivetests(int quick, int continuous, char *justone) {
   return 0;
 }
 
+// 情况1：在 RAMDisk 上，usertests 全通过
+// 代表当前的虚拟内存（VM）、页表权限、Trap 处理、系统调用接口以及文件系统逻辑层（Log/Inode/Dir）已经完全正确且健壮
 int
 main(int argc, char *argv[])
 {
