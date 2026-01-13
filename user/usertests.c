@@ -2160,7 +2160,7 @@ forktest(char *s)
 void
 sbrkbasic(char *s)
 {
-  enum { TOOMUCH=1024*1024*1024};
+  enum { TOOMUCH=1024*1024*1024}; // 不可以太大，因为会解析为负数，导致sbrk测试失败
   int i, pid, xstatus;
   char *c, *a, *b;
 
