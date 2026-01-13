@@ -110,8 +110,8 @@ usertrap(void)
 		// --- 1. 系统调用 (Syscall) ---
 		
 		// 【新增】如果进程已被 kill，不要执行系统调用
-    if(killed(p))
-      kexit(-1);
+		if(killed(p))
+			kexit(-1);
 
 		// 跳过 ecall 指令
 		p->trapframe->epc += 4;
@@ -139,18 +139,27 @@ usertrap(void)
 	} 
 	else {
 		if(r_scause() == 15 || r_scause() == 13){
-			vmfault(p->pagetable, r_stval(), (r_scause() == 13) ? 1 : 0);
+			if(vmfault(p->pagetable, r_stval(), (r_scause() == 13) ? 1 : 0) != 0){
+				// 成功处理缺页
+			} else {
+				// 处理缺页失败，杀死进程
+				// printf("usertrap(): vmfault failed pid=%d scause=0x%p stval=0x%p\n",
+				// 	p->pid, scause, r_stval());
+				setkilled(p);
+			}
 		}
-		// --- 4. 用户态异常 (User Exception) ---
-		// 【修改】不要 panic，而是杀死当前进程
-		printf("usertrap(): unexpected scause 0x%p pid=%d\n", scause, p->pid);
-		printf("            sepc=0x%p stval=0x%p\n", r_sepc(), r_stval());
-		setkilled(p);
+		else {
+			// --- 4. 用户态异常 (User Exception) ---
+			// 【修改】不要 panic，而是杀死当前进程
+			printf("usertrap(): unexpected scause 0x%p pid=%d\n", scause, p->pid);
+			printf("            sepc=0x%p stval=0x%p\n", r_sepc(), r_stval());
+			setkilled(p);
+		}
 	}
 
 	// 【新增】如果进程已被 kill，退出
-  if(killed(p))
-    kexit(-1);
+	if(killed(p))
+		kexit(-1);
 
 	// 【新增】如果是时钟中断，让出 CPU (抢占)
 	if(which_dev == 2)

@@ -565,20 +565,44 @@ vmfault(pagetable_t pagetable, uint64 va, int read)
   uint64 mem;
   struct proc *p = myproc();
 
-  if (va >= p->sz)
+  // 1. 检查地址是否越界
+  if (va >= p->sz) {
+    // [调试信息]
+    // printf("vmfault: va %p out of bounds (sz=%p)\n", va, p->sz);
     return 0;
+  }
+
+  // 对齐地址
   va = PGROUNDDOWN(va);
+
+  // 2. 检查是否已经映射 (防止重复映射)
   if(ismapped(pagetable, va)) {
-    return 0;
+    // [调试信息]
+    // printf("vmfault: va %p already mapped\n", va);
+    return 0; 
   }
+
+  // 3. 分配物理内存
   mem = (uint64) kalloc();
-  if(mem == 0)
-    return 0;
-  memset((void *) mem, 0, PGSIZE);
-  if (mappages(p->pagetable, va, PGSIZE, mem, PTE_W|PTE_U|PTE_R) != 0) {
-    kfree((void *)mem);
+  if(mem == 0) {
+    // [调试信息]
+    // printf("vmfault: kalloc failed (OOM)\n");
     return 0;
   }
+  
+  memset((void *) mem, 0, PGSIZE);
+
+  // 4. 建立映射
+  // [K230修复] 必须设置 PTE_A | PTE_D (K230不支持硬件自动设置)
+  // 必须设置 PTE_THEAD_MAEE 开启缓存支持，否则无法从用户态访问该页
+  // 如果不设置的话，又会引发新的缺页异常，形成死循环
+  if (mappages(p->pagetable, va, PGSIZE, mem, 
+              PTE_W | PTE_U | PTE_R | PTE_A | PTE_D | PTE_THEAD_MAEE) != 0) {
+      // printf("vmfault: mappages failed\n");
+      kfree((void *)mem);
+      return 0;
+  }
+
   return mem;
 }
 
