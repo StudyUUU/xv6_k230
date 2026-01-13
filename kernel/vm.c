@@ -467,10 +467,10 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
 
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
-      panic("uvmcopy: pte should exist");
+      continue;    // 页表项不存在，跳过，懒分配页面
     if((*pte & PTE_V) == 0)
-      panic("uvmcopy: page not present");
-    
+      continue;   // 物理页不存在，跳过，懒分配页面
+      
     pa = PTE2PA(*pte);
     
     // [核心修改 START]
