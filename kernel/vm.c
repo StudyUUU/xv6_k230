@@ -286,33 +286,30 @@ uvmcreate()
  */
 pagetable_t
 proc_pagetable(struct proc *p)
-{
+{ 
+  // 创建一个空的用户页表
   pagetable_t pagetable = uvmcreate();
   if(pagetable == 0)
     return 0;
 
   // 映射trampoline: 所有进程共享同一个陷阱入口页
-  if(mappages(pagetable,
-              TRAMPOLINE,
-              PGSIZE,
-              (uint64)trampoline,
-              PTE_R | PTE_X | PTE_A) < 0)
-    goto bad;
+  if(mappages(pagetable, TRAMPOLINE, PGSIZE, (uint64)trampoline, PTE_R | PTE_X | PTE_A) < 0){
+    // 针对映射失败，释放页表，而不是 panic
+    uvmfree(pagetable, 0);
+    return 0;
+  }
+
 
   // 映射trapframe: 只给 S-mode 用，但在用户页表里，用于恢复用户上下文
-  if(mappages(pagetable,
-              TRAPFRAME,
-              PGSIZE,
-              (uint64)p->trapframe,
-              PTE_R | PTE_W | PTE_A | PTE_D | PTE_THEAD_MAEE) < 0)
-    goto bad;
+  if(mappages(pagetable, TRAPFRAME, PGSIZE, (uint64)p->trapframe, PTE_R | PTE_W | PTE_A | PTE_D | PTE_THEAD_MAEE) < 0)
+  {
+    // 针对映射失败，取消之前的 trampoline 映射并释放页表，而不是 panic
+    uvmunmap(pagetable, TRAMPOLINE, 1, 0);
+    uvmfree(pagetable, 0);
+    return 0;
+  }
 
   return pagetable;
-
-bad:
-  panic("proc_pagetable: mappages failed");
-  uvmfree(pagetable, 0);
-  return 0;
 }
 
 /*
