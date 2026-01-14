@@ -175,6 +175,7 @@ void uartintr(void);   // 供 trap.c 调用
 void sd_init(void);
 int sd_read_sector(uint32 sector, uint32 *dst);
 int sd_write_sector(uint32 sector, uint32 *src);
+void sd_disk_rw(struct buf *b, int write); // Buffer Cache 桥接函数
 
 // exec.c
 int             kexec(char*, char**);

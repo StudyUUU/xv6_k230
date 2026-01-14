@@ -98,10 +98,8 @@ bread(uint dev, uint blockno)
 
   b = bget(dev, blockno);
   if(!b->valid) {
-    //virtio_disk_rw(b, 0);
-    // 使用内存模拟磁盘读写
-    ramdisk_rw(b, 0);  // 读操作
-
+    // ramdisk_rw(b, 0);  // 使用内存模拟磁盘读写
+    sd_disk_rw(b, 0); // 使用SD卡读写
     b->valid = 1;
   }
   return b;
@@ -113,9 +111,8 @@ bwrite(struct buf *b)
 {
   if(!holdingsleep(&b->lock))
     panic("bwrite");
-  // virtio_disk_rw(b, 1);
-  // 使用内存模拟磁盘读写
-  ramdisk_rw(b, 1);  // 写操作
+  // ramdisk_rw(b, 1);  // 使用内存模拟磁盘读写
+  sd_disk_rw(b, 1); // 使用SD卡读写
 }
 
 // Release a locked buffer.

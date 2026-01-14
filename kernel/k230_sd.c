@@ -1,4 +1,3 @@
-
 #include "types.h"
 #include "riscv.h"
 #include "defs.h"
@@ -11,6 +10,8 @@
 #include "k230_sd.h"
 
 struct spinlock sd_lock;
+uint32 fat32_offset_sector = 0;  // 全局变量定义
+uint32 sd_rca = 0;               // 定义全局变量
 
 void delay(int count)
 {
@@ -169,39 +170,44 @@ void sd_reset_and_clock()
 void sd_mount_largest_partition()
 {
     static uint32 buf[128];
-    uint32 max_size = 0;
-
-    // 读 MBR
-    if (sd_read_sector(0, buf) != 0)
-        return;
-
-    struct partition_entry *part = (struct partition_entry *)&((uint8 *)buf)[446];
-
-    // 遍历 4 个分区
-    for (int i = 0; i < 4; i++)
-    {
-        // FAT32 (0x0B 或 0x0C)
-        if (part[i].type == 0x0B || part[i].type == 0x0C)
-        {
-            if (part[i].sector_count > max_size)
-            {
-                max_size = part[i].sector_count;
-                fat32_offset_sector = part[i].lba_start;
-            }
+    
+    printf("\n=== SD Card GPT Partition Detection ===\n");
+    
+    // GPT boot分区在LBA 0xf000 (61440)
+    fat32_offset_sector = 0xf000;
+    
+    printf("[SD] Using boot partition at LBA 0x%x (%d)\n", 
+           fat32_offset_sector, fat32_offset_sector);
+    
+    // 验证超级块
+    uint32 sb_sector = fat32_offset_sector + 2;  // Block 1 = LBA + 2
+    if (sd_read_sector(sb_sector, buf) == 0) {
+        struct superblock {
+            uint magic;
+            uint size;
+            uint nblocks;
+            uint ninodes;
+            uint nlog;
+            uint logstart;
+            uint inodestart;
+            uint bmapstart;
+        } *sb = (struct superblock *)buf;
+        
+        printf("  Superblock verification:\n");
+        printf("    Magic     : 0x%x ", sb->magic);
+        
+        if (sb->magic == 0x10205555 || sb->magic == 0x10203040) {
+            printf("✓\n");
+            printf("    Size      : %d blocks\n", sb->size);
+            printf("    Data blks : %d\n", sb->nblocks);
+            printf("    Ninodes   : %d\n", sb->ninodes);
+            printf("    Log start : %d\n", sb->logstart);
+        } else {
+            printf("✗ (got 0x%x)\n", sb->magic);
         }
     }
-
-    if (fat32_offset_sector != 0)
-    {
-
-                printf("k230_sd: Mounted Partition at Sector %d (%d MB)\n",
-                       fat32_offset_sector, max_size / 2048);
-    }
-    else
-    {
-
-                printf("k230_sd: [WARN] No suitable FAT32 partition found.\n");
-    }
+    
+    printf("===================================\n\n");
 }
 
 void sd_init(void)
@@ -266,8 +272,8 @@ void sd_disk_rw(struct buf *b, int write)
     // 如果一直是 0 或其他奇怪的数字，说明上层调用就有问题。
     // 如果是 1，说明终于开始读超级块了。
 
-            printf("[DEBUG] sd_disk_rw: Request Block=%d, Mode=%s\n",
-                   b->blockno, write ? "WRITE" : "READ");
+    // printf("[DEBUG] sd_disk_rw: Request Block=%d, Mode=%s\n",
+    //     b->blockno, write ? "WRITE" : "READ");
 
     if (BSIZE % 512 != 0)
         panic("sd_disk_rw: BSIZE must be multiple of 512");
@@ -278,8 +284,8 @@ void sd_disk_rw(struct buf *b, int write)
     // [调试点 2] 打印地址映射计算
     // 检查 start_sector 是否等于你 HxD 里看到的那个偏移量 (2097152 + ...)
 
-            printf("        --> Mapping: Block %d = Sectors [%d, %d] (Offset: %d)\n",
-                   b->blockno, start_sector, start_sector + sector_per_block - 1, fat32_offset_sector);
+    // printf("        --> Mapping: Block %d = Sectors [%d, %d] (Offset: %d)\n",
+    //     b->blockno, start_sector, start_sector + sector_per_block - 1, fat32_offset_sector);
 
     acquire(&sd_lock);
 
@@ -303,7 +309,7 @@ void sd_disk_rw(struct buf *b, int write)
 
         if (ret != 0)
         {
-                    printf("[ERROR] sd_disk_rw: Hardware IO Failed at Sector %d\n", current_sector);
+            printf("[ERROR] sd_disk_rw: Hardware IO Failed at Sector %d\n", current_sector);
         }
     }
 
@@ -312,20 +318,20 @@ void sd_disk_rw(struct buf *b, int write)
     if (!write && b->blockno == 46)
     {
 
-                printf("\n[DEBUG] === Bitmap Block 46 Inspection ===\n");
+        // printf("\n[DEBUG] === Bitmap Block 46 Inspection ===\n");
         uint8 *p = (uint8 *)b->data;
 
-        // 打印前 64 个字节
-        // 我们期望看到：FF FF ... (约49个) ... 然后变成 00 00
-        // 如果全是 FF，那就是读错了！
-        for (int k = 0; k < 64; k++)
-        {
-                printf("%x ", p[k]);
-            if ((k + 1) % 16 == 0)
-                    printf("\n");
-        }
+        // // 打印前 64 个字节
+        // // 我们期望看到：FF FF ... (约49个) ... 然后变成 00 00
+        // // 如果全是 FF，那就是读错了！
+        // for (int k = 0; k < 64; k++)
+        // {
+        //     printf("%x ", p[k]);
+        //     if ((k + 1) % 16 == 0)
+        //             printf("\n");
+        // }
 
-            printf("==========================================\n\n");
+        //     printf("==========================================\n\n");
     }
     // [调试点 3] 超级块核查 (最关键的一步！)
     // 如果读的是 Block 1，我们必须把它的内容打印出来看看。
@@ -335,15 +341,11 @@ void sd_disk_rw(struct buf *b, int write)
         struct superblock *sb = (struct superblock *)b->data;
 
 
-                printf("\n[DEBUG] === Superblock Inspection (Block 1) ===\n");
-
-                printf("        Magic Number : 0x%x (Expect: 0x10205555 or 0x10203040)\n", sb->magic);
-
-                printf("        Size (blocks): %d\n", sb->size);
-
-                printf("        Ninodes      : %d\n", sb->ninodes);
-
-                printf("===========================================\n\n");
+        // printf("\n[DEBUG] === Superblock Inspection (Block 1) ===\n");
+        // printf("        Magic Number : 0x%x (Expect: 0x10205555 or 0x10203040)\n", sb->magic);
+        // printf("        Size (blocks): %d\n", sb->size);
+        // printf("        Ninodes      : %d\n", sb->ninodes);
+        // printf("===========================================\n\n");
 
         // 严重错误预警：如果读出来全是 0
         if (sb->magic == 0)

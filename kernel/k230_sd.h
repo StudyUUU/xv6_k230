@@ -68,7 +68,9 @@
 
 // 全局变量：存储文件系统的起始偏移量（单位：扇区）
 // 默认为 0，如果在 MBR 中找到了分区，会被更新为分区的起始 LBA
-uint32 fat32_offset_sector = 0;
+extern uint32 fat32_offset_sector;
+extern uint32 sd_rca;
+
 struct partition_entry
 {
     uint8 status;
@@ -80,7 +82,6 @@ struct partition_entry
 } __attribute__((packed));
 // MBR 分区表项结构体 (标准定义，16字节)
 // 使用 __attribute__((packed)) 防止编译器进行字节对齐填充
-uint32 sd_rca = 0;
 // FAT32 引导扇区 (BPB) 结构
 struct fat32_bpb
 {
