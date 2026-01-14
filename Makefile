@@ -45,7 +45,8 @@ KOBJS = \
   $K/pipe.o \
   $K/ramdisk.o \
   $K/ramdisk_img.o \
-  $K/exec.o
+  $K/exec.o \
+  $K/k230_sd.o 
 
 # =========================================================
 # User / FS build config

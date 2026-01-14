@@ -169,6 +169,13 @@ void panic(char*) __attribute__((noreturn));
 void consoleintr(int); // 供 trap.c 调用 (如果没有合并 uartintr)
 void uartintr(void);   // 供 trap.c 调用
 
+// ============================================================================
+// SD 卡驱动 (k230_sd.c)
+// ============================================================================
+void sd_init(void);
+int sd_read_sector(uint32 sector, uint32 *dst);
+int sd_write_sector(uint32 sector, uint32 *src);
+
 // exec.c
 int             kexec(char*, char**);
 

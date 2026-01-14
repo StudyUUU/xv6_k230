@@ -218,6 +218,8 @@ kvmmake(void)
   kvmmap(kpgtbl, PLIC, PLIC, 0x4000000, 
          PTE_R | PTE_W | PTE_A | PTE_D | PTE_IO);
 
+  // K230 特有：SD1 控制器映射
+  kvmmap(kpgtbl, K230_SD1, K230_SD1, PGSIZE, PTE_R | PTE_W | PTE_A | PTE_D | PTE_IO);
   // =============================================================
   // 第二部分：高端逻辑映射区 (High VA Mapping, VA != PA)
   // =============================================================
