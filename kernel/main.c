@@ -22,12 +22,8 @@ void main()
 		binit();         // buffer cache
 		iinit();         // inode table
 		fileinit();      // file table
-		
-		// 初始化SD卡驱动
-		sd_init();
-		
-		// 注释掉ramdisk，使用SD卡
-		// ramdisk_init();
+
+		sd_init();  // 初始化SD卡
 		
 		userinit();
 
