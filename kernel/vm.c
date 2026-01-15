@@ -218,18 +218,20 @@ kvmmake(void)
   kvmmap(kpgtbl, PLIC, PLIC, 0x4000000, 
          PTE_R | PTE_W | PTE_A | PTE_D | PTE_IO);
 
-  // K230 特有：SD1 控制器映射
-  kvmmap(kpgtbl, K230_SD1, K230_SD1, PGSIZE, PTE_R | PTE_W | PTE_A | PTE_D | PTE_IO);
+  // 6. SD1 控制器: 0x91581000 [cite: K230_SD1 定义于 memlayout.h]
+  // 用于 SD 卡读写，xv6 文件系统的持久化存储后端
+  kvmmap(kpgtbl, K230_SD1, K230_SD1, PGSIZE, 
+         PTE_R | PTE_W | PTE_A | PTE_D | PTE_IO);
   // =============================================================
   // 第二部分：高端逻辑映射区 (High VA Mapping, VA != PA)
   // =============================================================
 
-  // 6. Trampoline: 映射到虚拟空间最高点 (MAXVA - PGSIZE) [cite: 7, 25]
+  // 7. Trampoline: 映射到虚拟空间最高点 (MAXVA - PGSIZE) [cite: 7, 25]
   // 指向物理内存中的 trampoline 代码页
   kvmmap(kpgtbl, TRAMPOLINE, (uint64)trampoline, PGSIZE, 
          PTE_R | PTE_X | PTE_A);
 
-  // 7. 内核栈 (Kernel Stacks): 每个进程独立映射 [cite: 7, 38]
+  // 8. 内核栈 (Kernel Stacks): 每个进程独立映射 [cite: 7, 38]
   // 内部会调用 kvmmap 将 KSTACK(i) 映射到 kalloc() 分配的物理页
   proc_mapstacks(kpgtbl);
 

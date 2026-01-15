@@ -172,13 +172,15 @@ void uartintr(void);   // 供 trap.c 调用
 // ============================================================================
 // SD 卡驱动 (k230_sd.c)
 // ============================================================================
-void sd_init(void);
-int sd_read_sector(uint32 sector, uint32 *dst);
-int sd_write_sector(uint32 sector, uint32 *src);
-void sd_disk_rw(struct buf *b, int write); // Buffer Cache 桥接函数
+void            sd_init(void);                              // 初始化 SD 卡控制器
+int             sd_read_sector(uint32, uint32*);            // 读取单个扇区（512 字节）
+int             sd_write_sector(uint32, uint32*);           // 写入单个扇区（512 字节）
+void            sd_disk_rw(struct buf*, int);               // Buffer Cache 接口（替代 ramdisk_rw）
 
-// exec.c
-int             kexec(char*, char**);
+// ============================================================================
+// 程序执行 (exec.c)
+// ============================================================================
+int             kexec(char*, char**);                       // 加载并执行用户程序
 
 // syscall.c
 void            argint(int, int*);
