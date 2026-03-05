@@ -108,9 +108,9 @@ $U/%.o: $U/%.c
 $(MKFS): mkfs/mkfs.c $K/fs.h $K/types.h $K/stat.h $K/param.h
 	gcc -Werror -Wall -I. -o $(MKFS) mkfs/mkfs.c
 
-# 确保 README 存在，否则 mkfs 会报错
-fs.img: $(MKFS) README $(UPROGS)
-	$(MKFS) fs.img README $(UPROGS)
+# mkfs 
+fs.img: $(MKFS) $(UPROGS)
+	$(MKFS) fs.img $(UPROGS)
 
 # =========================================================
 # kernel build rules
