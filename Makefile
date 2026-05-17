@@ -13,7 +13,7 @@ OBJDUMP = $(TOOLPREFIX)objdump
 K = kernel
 
 KCFLAGS = -Wall -Werror -O -fno-omit-frame-pointer -ggdb
-KCFLAGS += -mcmodel=medany -mno-relax
+KCFLAGS += -march=rv64gc_zifencei -mcmodel=medany -mno-relax
 KCFLAGS += -ffreestanding -fno-common -nostdlib -mno-riscv-attribute
 KCFLAGS += -I.
 
@@ -79,8 +79,14 @@ UPROGS=\
 # =========================================================
 # Top-level targets
 # =========================================================
+TFTPDIR = /srv/tftp
+
 # 不再依赖 $(INITCODE_H)
 all: kernel.bin
+
+deploy: kernel.bin
+	SUDO_ASKPASS=/home/akai/.local/bin/sudoplz-askpass sudo -A cp kernel.bin $(TFTPDIR)/kernel.bin
+	SUDO_ASKPASS=/home/akai/.local/bin/sudoplz-askpass sudo -A chmod 666 $(TFTPDIR)/kernel.bin
 
 # =========================================================
 # User Library & Program Rules
@@ -120,7 +126,6 @@ fs.img: $(MKFS) $(UPROGS)
 kernel.bin: $(KOBJS) $(K)/kernel.ld fs.img
 	$(LD) -T $(K)/kernel.ld -o kernel.elf $(KOBJS)
 	$(OBJCOPY) -O binary kernel.elf kernel.bin
-	cp kernel.bin /home/alientek/linux/tftp/
 
 $K/%.o: $K/%.c
 	$(CC) $(KCFLAGS) -c $< -o $@

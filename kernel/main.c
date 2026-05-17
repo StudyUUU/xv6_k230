@@ -23,8 +23,9 @@ void main()
 		iinit();         // inode table
 		fileinit();      // file table
 
-		sd_init();  // 初始化SD卡
-		
+		ramdisk_init(); //使用内置的ramdisk作为根文件系统，模拟SD卡的文件系统
+		// sd_init(); // 初始化SD卡
+
 		userinit();
 
 		printf("hart %d starting\n", cpuid());
