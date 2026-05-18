@@ -77,6 +77,7 @@
 #define PTE_G (1L << 5) // Global - 全局映射
 #define PTE_A (1L << 6) // Accessed - 已访问（K230 不自动设置，必须手动）
 #define PTE_D (1L << 7) // Dirty - 已修改（K230 不自动设置，必须手动）
+#define PTE_COW (1L << 8) // Copy-on-Write (RSW 位，软件自定义)
 
 // --- T-Head C908 扩展 PTE 标志位 ---
 // K230 的 C908 核心扩展了 PTE 高位（bit 59-63）用于内存属性控制

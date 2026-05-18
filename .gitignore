@@ -83,7 +83,11 @@ gdb.txt
 compile_commands.json
 .cache/
 
-# LLM的指导文件
+# ai agent的指导文件以及mcp配置文件
+CLAUDE.md
+AGENTS.md
+GEMINI.md
+.mcp.json
+# 文档和 GitHub 相关文件
 .github/
-
 /docs/

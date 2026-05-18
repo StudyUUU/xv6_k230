@@ -127,7 +127,8 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
       continue;
     if(do_free){
       uint64 pa = PTE2PA(*pte);
-      kfree((void*)pa);
+      if(pa >= KERNBASE && pa < PHYSTOP)
+        kfree((void*)pa);
     }
     *pte = 0;
   }
@@ -463,43 +464,25 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
 {
   pte_t *pte;
   uint64 pa, i;
-  uint64 flags; // [关键] 必须是 64 位，用来存高位属性
-  char *mem;
+  uint64 flags;
 
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
-      continue;    // 页表项不存在，跳过，懒分配页面
+      continue;
     if((*pte & PTE_V) == 0)
-      continue;   // 物理页不存在，跳过，懒分配页面
-      
-    pa = PTE2PA(*pte);
-    
-    // [核心修改 START]
-    // 原来的写法: flags = PTE_FLAGS(*pte); (只取了低10位)
-    
-    // 现在的写法: 
-    // 我们需要 *pte 中除了 PPN (物理页号) 之外的所有位。
-    // 在 RISC-V Sv39 中，PPN 是 [53:10]。
-    // 0x003FFFFFFFFFFC00UL 是 PPN 的掩码 (54位物理地址空间)
-    // 取反 (~)，就是“除了PPN之外的所有位”。
-    flags = *pte & ~0x003FFFFFFFFFFC00UL;
-    
-    // 或者更简单的逻辑：保留低10位 + 保留高位(MAEE)
-    // 假设 MAEE 在 bit 59-63
-    // flags = PTE_FLAGS(*pte) | (*pte & 0xF800000000000000UL);
-    
-    // 推荐用第一种取反的方法，最通用，防止漏掉其他高位属性
-    // [核心修改 END]
+      continue;
 
-    if((mem = kalloc()) == 0)
-      goto err;
-    memmove(mem, (char*)pa, PGSIZE);
-    
-    // 注意：mappages 的最后一个参数一定要改为 uint64
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
-      goto err;
+    pa = PTE2PA(*pte);
+    flags = *pte & ~0x003FFFFFFFFFFC00UL;
+
+    // Share the physical page (COW for writable, direct share for read-only)
+    krefpage((void*)pa);
+    if(flags & PTE_W){
+      flags = (flags | PTE_COW) & ~PTE_W;
+      *pte = (*pte & ~(PTE_W | PTE_COW)) | PTE_COW;
     }
+    if(mappages(new, i, PGSIZE, (uint64)pa, flags) != 0)
+      goto err;
   }
   return 0;
 
@@ -558,48 +541,52 @@ uvmclear(pagetable_t pagetable, uint64 va)
 }
 // allocate and map user memory if process is referencing a page
 // that was lazily allocated in sys_sbrk().
-// returns 0 if va is invalid or already mapped, or if
-// out of physical memory, and physical address if successful.
+// also handles Copy-on-Write page faults.
+// returns 0 if va is invalid, or if out of physical memory.
+// returns physical address if successful.
 uint64
 vmfault(pagetable_t pagetable, uint64 va, int read)
 {
   uint64 mem;
   struct proc *p = myproc();
 
-  // 1. 检查地址是否越界
-  if (va >= p->sz) {
-    // [调试信息]
-    // printf("vmfault: va %p out of bounds (sz=%p)\n", va, p->sz);
+  if (va >= p->sz)
     return 0;
-  }
 
-  // 对齐地址
   va = PGROUNDDOWN(va);
 
-  // 2. 检查是否已经映射 (防止重复映射)
   if(ismapped(pagetable, va)) {
-    // [调试信息]
-    // printf("vmfault: va %p already mapped\n", va);
-    return 0; 
-  }
+    // Check if this is a COW page
+    pte_t *pte = walk(pagetable, va, 0);
+    if(pte && (*pte & PTE_COW)) {
+      uint64 pa = PTE2PA(*pte);
+      uint64 flags = *pte & ~0x003FFFFFFFFFFC00UL;
 
-  // 3. 分配物理内存
-  mem = (uint64) kalloc();
-  if(mem == 0) {
-    // [调试信息]
-    // printf("vmfault: kalloc failed (OOM)\n");
+      mem = (uint64)kalloc();
+      if(mem == 0)
+        return 0;
+
+      memmove((void*)mem, (void*)pa, PGSIZE);
+
+      flags = (flags | PTE_W) & ~PTE_COW;
+      *pte = PA2PTE(mem) | flags | PTE_V;
+
+      kfree((void*)pa);
+      sfence_vma();
+      return mem;
+    }
     return 0;
   }
-  
+
+  // Lazy allocation
+  mem = (uint64) kalloc();
+  if(mem == 0)
+    return 0;
+
   memset((void *) mem, 0, PGSIZE);
 
-  // 4. 建立映射
-  // [K230修复] 必须设置 PTE_A | PTE_D (K230不支持硬件自动设置)
-  // 必须设置 PTE_THEAD_MAEE 开启缓存支持，否则无法从用户态访问该页
-  // 如果不设置的话，又会引发新的缺页异常，形成死循环
-  if (mappages(p->pagetable, va, PGSIZE, mem, 
+  if (mappages(p->pagetable, va, PGSIZE, mem,
               PTE_W | PTE_U | PTE_R | PTE_A | PTE_D | PTE_THEAD_MAEE) != 0) {
-      // printf("vmfault: mappages failed\n");
       kfree((void *)mem);
       return 0;
   }
@@ -626,19 +613,25 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
     va0 = PGROUNDDOWN(dstva);
     if(va0 >= MAXVA)
       return -1;
-  
+
     pa0 = walkaddr(pagetable, va0);
     if(pa0 == 0) {
       if((pa0 = vmfault(pagetable, va0, 0)) == 0) {
         return -1;
       }
+    } else {
+      pte = walk(pagetable, va0, 0);
+      if(pte && (*pte & PTE_COW)) {
+        if((pa0 = vmfault(pagetable, va0, 0)) == 0) {
+          return -1;
+        }
+      }
     }
 
     pte = walk(pagetable, va0, 0);
-    // forbid copyout over read-only user text pages.
     if((*pte & PTE_W) == 0)
       return -1;
-      
+
     n = PGSIZE - (dstva - va0);
     if(n > len)
       n = len;

@@ -4,7 +4,7 @@
 #include "memlayout.h"
 #include "spinlock.h"
 
-extern char end[]; // kernel.ld 中定义的内核结束地址
+extern char end[];
 
 struct run {
   struct run *next;
@@ -15,34 +15,62 @@ struct {
   struct run *freelist;
 } kmem;
 
+// 物理页引用计数，用于 COW
+#define KREF_INDEX(pa) (((uint64)(pa) - KERNBASE) / PGSIZE)
+#define KREF_COUNT     ((PHYSTOP - KERNBASE) / PGSIZE)
+int krefcount[KREF_COUNT];
+
+void krefpage(void *pa) {
+  uint64 idx = KREF_INDEX(pa);
+  if(idx >= KREF_COUNT) return;
+  acquire(&kmem.lock);
+  krefcount[idx]++;
+  release(&kmem.lock);
+}
+
+int kgetref(void *pa) {
+  uint64 idx = KREF_INDEX(pa);
+  if(idx >= KREF_COUNT) return 1;
+  acquire(&kmem.lock);
+  int ref = krefcount[idx];
+  release(&kmem.lock);
+  return ref;
+}
 
 // 初始化物理内存
 void kinit() {
   initlock(&kmem.lock, "kmem");
-
-  // 从内核结束的地方开始，一直到物理内存结束
-  // 把每一页都释放掉(kfree)，这样它们就进入了 freelist
   char *p = (char*)PGROUNDUP((uint64)end);
-  for(; p + PGSIZE <= (char*)PHYSTOP; p += PGSIZE)
+  for(; p + PGSIZE <= (char*)PHYSTOP; p += PGSIZE) {
+    krefcount[KREF_INDEX(p)] = 1;
     kfree(p);
+  }
 }
 
 // 释放一页物理内存
 void kfree(void *pa) {
   struct run *r;
   if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
-  {
-    panic("kfree error");
+    panic("kfree");
+
+  uint64 idx = KREF_INDEX(pa);
+  if(idx < KREF_COUNT) {
+    acquire(&kmem.lock);
+    if(krefcount[idx] > 1) {
+      krefcount[idx]--;
+      release(&kmem.lock);
+      return;
+    }
+    krefcount[idx] = 0;
+    release(&kmem.lock);
   }
 
-  memset(pa, 1, PGSIZE); // 释放时用垃圾数据(1)填充，方便调试发现野指针
+  memset(pa, 1, PGSIZE);
 
   acquire(&kmem.lock);
-
   r = (struct run*)pa;
   r->next = kmem.freelist;
   kmem.freelist = r;
-
   release(&kmem.lock);
 }
 
@@ -56,7 +84,9 @@ void *kalloc(void) {
     kmem.freelist = r->next;
   release(&kmem.lock);
 
-  if(r)
-    memset((char*)r, 0, PGSIZE); 
+  if(r) {
+    memset((char*)r, 0, PGSIZE);
+    krefcount[KREF_INDEX(r)] = 1;
+  }
   return (void*)r;
 }

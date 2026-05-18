@@ -42,6 +42,8 @@ char* strncpy(char*, const char*, int);
 void kinit(void);           // 初始化空闲页链表
 void* kalloc(void);         // 分配一个物理页
 void kfree(void *pa);       // 释放一个物理页
+void krefpage(void *pa);    // 增加物理页引用计数
+int  kgetref(void *pa);     // 获取物理页引用计数
 
 // ============================================================================
 // 虚拟内存管理 (vm.c)

@@ -457,7 +457,6 @@ kfork(void)
   *(np->trapframe) = *(p->trapframe);
 
   // 4. 修改子进程的返回值为 0
-  // a0 寄存器在系统调用返回时存放返回值
   np->trapframe->a0 = 0;
 
   // 5. 复制文件描述符

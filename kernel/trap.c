@@ -143,14 +143,13 @@ usertrap(void)
 				// 成功处理缺页
 			} else {
 				// 处理缺页失败，杀死进程
-				// printf("usertrap(): vmfault failed pid=%d scause=0x%p stval=0x%p\n",
-				// 	p->pid, scause, r_stval());
+				printf("usertrap(): vmfault failed pid=%d scause=0x%p stval=0x%p\n",
+					p->pid, scause, r_stval());
 				setkilled(p);
 			}
 		}
 		else {
 			// --- 4. 用户态异常 (User Exception) ---
-			// 【修改】不要 panic，而是杀死当前进程
 			printf("usertrap(): unexpected scause 0x%p pid=%d\n", scause, p->pid);
 			printf("            sepc=0x%p stval=0x%p\n", r_sepc(), r_stval());
 			setkilled(p);
