@@ -85,3 +85,5 @@ compile_commands.json
 
 # LLM的指导文件
 .github/
+
+/docs/
